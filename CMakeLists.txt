@@ -47,7 +47,10 @@ endif()
 add_library(xtensor-wrappers INTERFACE)
 target_include_directories(
   xtensor-wrappers INTERFACE "$<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>")
-target_link_libraries(xtensor-wrappers INTERFACE xtensor-fftw
+# xtensor is linked explicitly (not just via xtensor-fftw): the public API is
+# built on xt::xarray, and a consumer's xtensor-fftw target may not carry the
+# xtensor include path transitively.
+target_link_libraries(xtensor-wrappers INTERFACE xtensor xtensor-fftw
                                                  PkgConfig::XTW_FFTW_DOUBLE)
 target_compile_features(xtensor-wrappers INTERFACE cxx_std_20)
 
@@ -62,11 +65,18 @@ if(XTENSOR_WRAPPERS_USE_OPENMP)
   target_link_libraries(xtensor-wrappers INTERFACE OpenMP::OpenMP_CXX)
 endif()
 
-# Unit tests. CTest's BUILD_TESTING defaults to OFF when this project is not
-# the top-level project, so pulling the library in as a dependency does not
-# fetch Catch2 or build the test suite.
-include(CTest)
-if(BUILD_TESTING)
+# Unit tests. Only the top-level project builds them (and only then does the
+# Catch2 dependency get fetched); a consumer that pulls this library in as a
+# subproject gets the library target and none of the test machinery.
+set(XTENSOR_WRAPPERS_BUILD_TESTS_DEFAULT OFF)
+if(PROJECT_IS_TOP_LEVEL)
+  set(XTENSOR_WRAPPERS_BUILD_TESTS_DEFAULT ON)
+endif()
+option(XTENSOR_WRAPPERS_BUILD_TESTS "Build the unit tests"
+       ${XTENSOR_WRAPPERS_BUILD_TESTS_DEFAULT})
+if(XTENSOR_WRAPPERS_BUILD_TESTS)
+  enable_testing()
+
   # Catch2 test framework (Catch2::Catch2WithMain for the test executables)
   FetchContent_Declare(
     Catch2
