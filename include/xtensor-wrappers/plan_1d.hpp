@@ -56,6 +56,33 @@ template <> struct plan_traits<float> {
     return fftwf_plan_dft(rank, n, in, out, direction, flags);
   }
 
+  static plan_type make_many_r2c(int rank, const int *n, int howmany,
+                                 real_type *in, const int *inembed, int istride,
+                                 int idist, complex_type *out,
+                                 const int *onembed, int ostride, int odist,
+                                 unsigned flags) {
+    return fftwf_plan_many_dft_r2c(rank, n, howmany, in, inembed, istride,
+                                   idist, out, onembed, ostride, odist, flags);
+  }
+
+  static plan_type make_many_c2r(int rank, const int *n, int howmany,
+                                 complex_type *in, const int *inembed,
+                                 int istride, int idist, real_type *out,
+                                 const int *onembed, int ostride, int odist,
+                                 unsigned flags) {
+    return fftwf_plan_many_dft_c2r(rank, n, howmany, in, inembed, istride,
+                                   idist, out, onembed, ostride, odist, flags);
+  }
+
+  static plan_type make_many_c2c(int rank, const int *n, int howmany,
+                                 complex_type *in, const int *inembed,
+                                 int istride, int idist, complex_type *out,
+                                 const int *onembed, int ostride, int odist,
+                                 int direction, unsigned flags) {
+    return fftwf_plan_many_dft(rank, n, howmany, in, inembed, istride, idist,
+                               out, onembed, ostride, odist, direction, flags);
+  }
+
   static void execute(plan_type p) { fftwf_execute(p); }
   static void destroy_plan(plan_type p) { fftwf_destroy_plan(p); }
 };
@@ -78,6 +105,33 @@ template <> struct plan_traits<double> {
   static plan_type make_c2c(int rank, const int *n, complex_type *in,
                             complex_type *out, int direction, unsigned flags) {
     return fftw_plan_dft(rank, n, in, out, direction, flags);
+  }
+
+  static plan_type make_many_r2c(int rank, const int *n, int howmany,
+                                 real_type *in, const int *inembed, int istride,
+                                 int idist, complex_type *out,
+                                 const int *onembed, int ostride, int odist,
+                                 unsigned flags) {
+    return fftw_plan_many_dft_r2c(rank, n, howmany, in, inembed, istride, idist,
+                                  out, onembed, ostride, odist, flags);
+  }
+
+  static plan_type make_many_c2r(int rank, const int *n, int howmany,
+                                 complex_type *in, const int *inembed,
+                                 int istride, int idist, real_type *out,
+                                 const int *onembed, int ostride, int odist,
+                                 unsigned flags) {
+    return fftw_plan_many_dft_c2r(rank, n, howmany, in, inembed, istride, idist,
+                                  out, onembed, ostride, odist, flags);
+  }
+
+  static plan_type make_many_c2c(int rank, const int *n, int howmany,
+                                 complex_type *in, const int *inembed,
+                                 int istride, int idist, complex_type *out,
+                                 const int *onembed, int ostride, int odist,
+                                 int direction, unsigned flags) {
+    return fftw_plan_many_dft(rank, n, howmany, in, inembed, istride, idist,
+                              out, onembed, ostride, odist, direction, flags);
   }
 
   static void execute(plan_type p) { fftw_execute(p); }
