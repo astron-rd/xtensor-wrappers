@@ -46,8 +46,9 @@ static void check_2d_irfft(const std::vector<std::size_t> &shape) {
   auto spec_copy = spec;
   auto ref = ref_c2r<T>(spec_copy, odd);
 
-  auto plan =
-      xt::fftw::make_irfft_plan(spec, xt::xarray<T>{}, odd, FFTW_ESTIMATE);
+  auto plan = xt::fftw::make_irfft_plan(
+      spec, xt::xarray<T>{},
+      {static_cast<int>(shape[0]), static_cast<int>(shape[1])}, FFTW_ESTIMATE);
   REQUIRE(plan.output().shape() == ref.shape());
   plan.execute();
   CHECK(allclose(plan.output(), ref));
@@ -68,15 +69,15 @@ TEST_CASE("2D irfft via the plan wrapper matches FFTW") {
   check_2d_irfft<double>({5, 7}); // odd inverse size
 }
 
-// The external-buffer ("into") variants are rank-generic; a 2D input proves
-// they cover the same ground as the 1D case with caller-owned buffers.
+// The caller-buffer overloads of make_*_plan() are rank-generic; a 2D input
+// proves they cover the same ground as the 1D case with caller-owned buffers.
 template <class T>
 static void check_2d_c2c_external(const std::vector<std::size_t> &shape) {
   auto in = random_complex<T>(shape);
   auto ref = ref_c2c<T>(in);
 
   std::vector<std::complex<T>> out(shape[0] * shape[1]);
-  auto p = xt::fftw::make_fft_plan_into(
+  auto p = xt::fftw::make_fft_plan(
       in.data(), out.data(),
       {static_cast<int>(shape[0]), static_cast<int>(shape[1])});
   p.execute();
@@ -93,7 +94,7 @@ static void check_2d_r2c_external(const std::vector<std::size_t> &shape) {
   const std::size_t half = shape.back() / 2 + 1;
 
   std::vector<std::complex<T>> out(shape[0] * half);
-  auto p = xt::fftw::make_rfft_plan_into(
+  auto p = xt::fftw::make_rfft_plan(
       in.data(), out.data(),
       {static_cast<int>(shape[0]), static_cast<int>(shape[1])});
   p.execute();
@@ -112,7 +113,7 @@ static void check_2d_irfft_external(const std::vector<std::size_t> &shape) {
   auto ref = ref_c2r<T>(spec_copy, odd);
 
   std::vector<T> out(shape[0] * shape[1]);
-  auto p = xt::fftw::make_irfft_plan_into(
+  auto p = xt::fftw::make_irfft_plan(
       spec.data(), out.data(),
       {static_cast<int>(shape[0]), static_cast<int>(shape[1])});
   p.execute();

@@ -47,8 +47,8 @@ template <class T> static void check_1d_irfft(const std::size_t n) {
   auto spec = ref_r2c(in); // half-complex spectrum (n/2+1 entries)
   auto ref = ref_c2r<T>(spec, odd);
 
-  auto plan =
-      xt::fftw::make_irfft_plan(spec, xt::xarray<T>{}, odd, FFTW_ESTIMATE);
+  auto plan = xt::fftw::make_irfft_plan(spec, xt::xarray<T>{},
+                                        {static_cast<int>(n)}, FFTW_ESTIMATE);
   REQUIRE(plan.output().shape() == std::vector<std::size_t>{n});
   plan.execute();
   CHECK(allclose(plan.output(), ref));
@@ -75,15 +75,15 @@ TEST_CASE("1D irfft reconstructs the real signal") {
   check_1d_irfft<double>(127); // odd inverse size
 }
 
-// The external-buffer ("into") variants write into caller-owned buffers.
+// The caller-buffer overloads of make_*_plan() write into user-owned memory.
 namespace {
 template <class T> static void check_1d_c2c_external(const std::size_t n) {
   auto in = random_complex<T>({n});
   auto ref = ref_c2c<T>(in);
 
   std::vector<std::complex<T>> out(n);
-  auto p = xt::fftw::make_fft_plan_into(in.data(), out.data(),
-                                        {static_cast<int>(n)});
+  auto p =
+      xt::fftw::make_fft_plan(in.data(), out.data(), {static_cast<int>(n)});
   p.execute();
 
   xt::xarray<std::complex<T>> o(std::vector<std::size_t>{n});
@@ -97,8 +97,8 @@ template <class T> static void check_1d_r2c_external(const std::size_t n) {
   const std::size_t half = n / 2 + 1;
 
   std::vector<std::complex<T>> out(half);
-  auto p = xt::fftw::make_rfft_plan_into(in.data(), out.data(),
-                                         {static_cast<int>(n)});
+  auto p =
+      xt::fftw::make_rfft_plan(in.data(), out.data(), {static_cast<int>(n)});
   p.execute();
 
   xt::xarray<std::complex<T>> o(std::vector<std::size_t>{half});
@@ -113,8 +113,8 @@ template <class T> static void check_1d_irfft_external(const std::size_t n) {
   auto ref = ref_c2r<T>(in, odd);
 
   std::vector<T> out(n);
-  auto p = xt::fftw::make_irfft_plan_into(in.data(), out.data(),
-                                          {static_cast<int>(n)});
+  auto p =
+      xt::fftw::make_irfft_plan(in.data(), out.data(), {static_cast<int>(n)});
   p.execute();
 
   xt::xarray<T> o(std::vector<std::size_t>{n});
@@ -127,8 +127,8 @@ template <class T> static void check_1d_c2c_inplace(const std::size_t n) {
   auto ref = ref_c2c<T>(in);
 
   std::vector<std::complex<T>> buf(in.begin(), in.end());
-  auto p = xt::fftw::make_fft_plan_into(buf.data(), buf.data(),
-                                        {static_cast<int>(n)});
+  auto p =
+      xt::fftw::make_fft_plan(buf.data(), buf.data(), {static_cast<int>(n)});
   p.execute();
 
   xt::xarray<std::complex<T>> o(std::vector<std::size_t>{n});

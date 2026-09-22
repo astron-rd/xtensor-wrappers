@@ -2,12 +2,15 @@
 #define XTENSOR_WRAPPERS_PLAN_HPP
 
 // Plan-based FFTW API for xtensor-fftw, all in the xt::fftw namespace:
-//   - plan_1d.hpp: basic_plan<T>/external_plan<T> and the N-D
-//     make_*_plan()/make_*_plan_into() factories, including the reusable plan
-//     machinery (plan_traits, thread-safe creation). Rank-generic, so 2D is
-//     covered by the same API as 1D.
+//   - plan_1d.hpp: basic_plan<T>/external_plan<T> and the N-D make_*_plan()
+//     factories, including the reusable plan machinery (plan_traits,
+//     thread-safe creation). Two factory overloads select the buffer model:
+//     xtensor inputs own their output (basic_plan), raw pointers transform
+//     between caller buffers (external_plan). Rank-generic, so 2D is covered
+//     by the same API as 1D.
 //   - plan_batch.hpp: batch_plan<T>/make_batch_*_plan(), batched transforms
-//     over strided memory via FFTW's guru (plan_many) interface.
+//     over strided memory via FFTW's guru (plan_many) interface, with the same
+//     owning / caller-buffer overload split.
 //
 // Including this umbrella header provides both. Include a specific header
 // instead if only part of it is needed.

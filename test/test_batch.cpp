@@ -1,7 +1,8 @@
 // Batched (guru plan_many) correctness of the xtensor-wrappers plan wrapper,
 // checked against the raw FFTW reference in test_helpers. Exercises padded
 // strides (e.g. a 1000-point FFT inside a 1024-element allocation), separate
-// input/output layouts, and element-level strides.
+// input/output layouts, element-level strides, and the owning vs caller-buffer
+// factory overloads.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -25,18 +26,16 @@ std::size_t per_of(const batch_layout &l, bool input) {
   return detail::elements_per_transform(l, input ? l.inembed : l.onembed);
 }
 
-std::size_t dist_of(const batch_layout &l, bool input) {
-  const std::size_t per = per_of(l, input);
-  const std::size_t dist = input ? l.idist : l.odist;
+// Distance between consecutive transforms on the input side (the borrowed
+// output side is derived from the layout when needed).
+std::size_t dist_of(const batch_layout &l) {
+  const std::size_t per = per_of(l, true);
+  const std::size_t dist = l.idist;
   return dist ? dist : per;
 }
 
-std::size_t vec_size(const batch_layout &l, bool input) {
-  return (l.howmany - 1) * dist_of(l, input) + per_of(l, input);
-}
-
-std::size_t stride_of(const batch_layout &l, bool input) {
-  return static_cast<std::size_t>(input ? l.istride : l.ostride);
+std::size_t input_vec_size(const batch_layout &l) {
+  return (l.howmany - 1) * dist_of(l) + per_of(l, true);
 }
 
 template <class T>
@@ -44,11 +43,11 @@ std::vector<std::complex<T>> random_complex_batch(const batch_layout &l,
                                                   unsigned seed,
                                                   std::size_t active = 0) {
   const std::size_t active_per = active ? active : detail::product(l.n);
-  std::vector<std::complex<T>> v(vec_size(l, true));
+  std::vector<std::complex<T>> v(input_vec_size(l));
   std::mt19937 rng(seed);
   std::uniform_real_distribution<T> dist(T(-100), T(100));
-  const std::size_t idist = dist_of(l, true);
-  const std::size_t stride = stride_of(l, true);
+  const std::size_t idist = dist_of(l);
+  const std::size_t stride = static_cast<std::size_t>(l.istride);
   for (std::size_t k = 0; k < l.howmany; ++k) {
     std::complex<T> *base = v.data() + k * idist;
     for (std::size_t i = 0; i < active_per; ++i) {
@@ -62,11 +61,11 @@ template <class T>
 std::vector<T> random_real_batch(const batch_layout &l, unsigned seed,
                                  std::size_t active = 0) {
   const std::size_t active_per = active ? active : detail::product(l.n);
-  std::vector<T> v(vec_size(l, true));
+  std::vector<T> v(input_vec_size(l));
   std::mt19937 rng(seed);
   std::uniform_real_distribution<T> dist(T(-100), T(100));
-  const std::size_t idist = dist_of(l, true);
-  const std::size_t stride = stride_of(l, true);
+  const std::size_t idist = dist_of(l);
+  const std::size_t stride = static_cast<std::size_t>(l.istride);
   for (std::size_t k = 0; k < l.howmany; ++k) {
     T *base = v.data() + k * idist;
     for (std::size_t i = 0; i < active_per; ++i) {
@@ -76,13 +75,37 @@ std::vector<T> random_real_batch(const batch_layout &l, unsigned seed,
   return v;
 }
 
+// Owned output shape: {howmany} prepended to the per-transform output shape.
+template <class T>
+xt::xarray<std::complex<T>> slice_output(const std::complex<T> *out,
+                                         std::size_t per, std::size_t stride,
+                                         std::size_t k, std::size_t count) {
+  const std::complex<T> *base = out + k * per;
+  xt::xarray<std::complex<T>> x(std::vector<std::size_t>{count});
+  for (std::size_t i = 0; i < count; ++i) {
+    x(i) = base[i * stride];
+  }
+  return x;
+}
+
+template <class T>
+xt::xarray<T> slice_output(const T *out, std::size_t per, std::size_t stride,
+                           std::size_t k, std::size_t count) {
+  const T *base = out + k * per;
+  xt::xarray<T> x(std::vector<std::size_t>{count});
+  for (std::size_t i = 0; i < count; ++i) {
+    x(i) = base[i * stride];
+  }
+  return x;
+}
+
 template <class T>
 xt::xarray<std::complex<T>> input_slice(const std::vector<std::complex<T>> &v,
                                         const batch_layout &l, std::size_t k,
                                         std::size_t active = 0) {
   const std::size_t active_per = active ? active : detail::product(l.n);
-  const std::complex<T> *base = v.data() + k * dist_of(l, true);
-  const std::size_t stride = stride_of(l, true);
+  const std::complex<T> *base = v.data() + k * dist_of(l);
+  const std::size_t stride = static_cast<std::size_t>(l.istride);
   xt::xarray<std::complex<T>> x(std::vector<std::size_t>{active_per});
   for (std::size_t i = 0; i < active_per; ++i) {
     x(i) = base[i * stride];
@@ -94,35 +117,10 @@ template <class T>
 xt::xarray<T> input_slice(const std::vector<T> &v, const batch_layout &l,
                           std::size_t k, std::size_t active = 0) {
   const std::size_t active_per = active ? active : detail::product(l.n);
-  const T *base = v.data() + k * dist_of(l, true);
-  const std::size_t stride = stride_of(l, true);
+  const T *base = v.data() + k * dist_of(l);
+  const std::size_t stride = static_cast<std::size_t>(l.istride);
   xt::xarray<T> x(std::vector<std::size_t>{active_per});
   for (std::size_t i = 0; i < active_per; ++i) {
-    x(i) = base[i * stride];
-  }
-  return x;
-}
-
-template <class T>
-xt::xarray<std::complex<T>>
-output_slice(const std::vector<std::complex<T>> &out, const batch_layout &l,
-             std::size_t k, std::size_t count) {
-  const std::complex<T> *base = out.data() + k * dist_of(l, false);
-  const std::size_t stride = stride_of(l, false);
-  xt::xarray<std::complex<T>> x(std::vector<std::size_t>{count});
-  for (std::size_t i = 0; i < count; ++i) {
-    x(i) = base[i * stride];
-  }
-  return x;
-}
-
-template <class T>
-xt::xarray<T> output_slice(const std::vector<T> &out, const batch_layout &l,
-                           std::size_t k, std::size_t count) {
-  const T *base = out.data() + k * dist_of(l, false);
-  const std::size_t stride = stride_of(l, false);
-  xt::xarray<T> x(std::vector<std::size_t>{count});
-  for (std::size_t i = 0; i < count; ++i) {
     x(i) = base[i * stride];
   }
   return x;
@@ -158,35 +156,33 @@ TEST_CASE("batched c2c: 1000-point FFT in 1024-element allocations") {
 
   auto in = random_complex_batch<T>(l, 42);
   auto plan = make_batch_fft_plan(in.data(), l);
-  REQUIRE(plan.output().size() == k * n); // tight output of n * howmany
+  REQUIRE(plan.output().shape() == std::vector<std::size_t>{k, n});
   plan.execute();
   for (std::size_t j = 0; j < k; ++j) {
     auto slice = input_slice(in, l, j);
     auto ref = ref_c2c<T>(slice);
-    auto out = output_slice(plan.output(), l, j, n);
+    auto out = slice_output(plan.output().data(), n, 1, j, n);
     CHECK(allclose(out, ref));
   }
 }
 
-TEST_CASE("batched c2c: padded input and padded output") {
+TEST_CASE("batched c2c: padded input, tight owned output") {
   using T = float;
-  constexpr std::size_t k = 4, n = 64, in_alloc = 80, out_alloc = 96;
+  constexpr std::size_t k = 4, n = 64, in_alloc = 80;
   batch_layout l;
   l.howmany = k;
   l.n = {n};
   l.inembed = {in_alloc};
   l.idist = in_alloc;
-  l.onembed = {out_alloc};
-  l.odist = out_alloc;
 
   auto in = random_complex_batch<T>(l, 7);
   auto plan = make_batch_fft_plan(in.data(), l);
-  REQUIRE(plan.output().size() == k * out_alloc);
+  REQUIRE(plan.output().shape() == std::vector<std::size_t>{k, n});
   plan.execute();
   for (std::size_t j = 0; j < k; ++j) {
     auto slice = input_slice(in, l, j);
     auto ref = ref_c2c<T>(slice);
-    auto out = output_slice(plan.output(), l, j, n);
+    auto out = slice_output(plan.output().data(), n, 1, j, n);
     CHECK(allclose(out, ref));
   }
 }
@@ -207,31 +203,29 @@ TEST_CASE("batched c2c: element stride") {
   for (std::size_t j = 0; j < k; ++j) {
     auto slice = input_slice(in, l, j);
     auto ref = ref_c2c<T>(slice);
-    auto out = output_slice(plan.output(), l, j, n);
+    auto out = slice_output(plan.output().data(), n, 1, j, n);
     CHECK(allclose(out, ref));
   }
 }
 
 TEST_CASE("batched r2c matches the FFTW reference") {
   using T = double;
-  constexpr std::size_t k = 6, n = 1000, alloc = 1024, out_alloc = 640;
+  constexpr std::size_t k = 6, n = 1000, alloc = 1024;
   batch_layout l;
   l.howmany = k;
   l.n = {n};
   l.inembed = {alloc};
   l.idist = alloc;
-  l.onembed = {out_alloc};
-  l.odist = out_alloc;
 
   auto in = random_real_batch<T>(l, 11);
   auto plan = make_batch_rfft_plan(in.data(), l);
-  REQUIRE(plan.output().size() == k * out_alloc);
-  plan.execute();
   const std::size_t half = n / 2 + 1;
+  REQUIRE(plan.output().shape() == std::vector<std::size_t>{k, half});
+  plan.execute();
   for (std::size_t j = 0; j < k; ++j) {
     auto slice = input_slice(in, l, j);
     auto ref = ref_r2c<T>(slice);
-    auto out = output_slice(plan.output(), l, j, half);
+    auto out = slice_output(plan.output().data(), half, 1, j, half);
     CHECK(allclose(out, ref));
   }
 }
@@ -248,18 +242,18 @@ TEST_CASE("batched irfft reconstructs the real signal") {
 
   auto in = random_complex_batch<T>(l, 13, half);
   auto plan = make_batch_irfft_plan(in.data(), l);
-  REQUIRE(plan.output().size() == k * n); // tight real output
+  REQUIRE(plan.output().shape() == std::vector<std::size_t>{k, n});
   plan.execute();
   for (std::size_t j = 0; j < k; ++j) {
     auto slice = input_slice(in, l, j, half);
     auto ref = ref_c2r<T>(slice, /*odd=*/true);
-    auto out = output_slice(plan.output(), l, j, n);
+    auto out = slice_output(plan.output().data(), n, 1, j, n);
     CHECK(allclose(out, ref));
   }
 }
 
-// The external-buffer ("into") batch variants write into a caller-owned output
-// buffer sized to the output footprint (vec_size(layout, false)).
+// Caller-buffer overloads: make_batch_*_plan(input, output, layout, ...) writes
+// into the user's buffer; the output layout (onembed/ostride/odist) is honored.
 TEST_CASE("batched c2c into caller buffers") {
   using T = double;
   constexpr std::size_t k = 8, n = 1000, alloc = 1024;
@@ -270,14 +264,13 @@ TEST_CASE("batched c2c into caller buffers") {
   l.idist = alloc;
 
   auto in = random_complex_batch<T>(l, 42);
-  std::vector<std::complex<T>> out(vec_size(l, false));
-  auto plan = make_batch_fft_plan_into(in.data(), out.data(), l);
-  REQUIRE(out.size() == k * n); // tight output of n * howmany
+  std::vector<std::complex<T>> out(k * n);
+  auto plan = make_batch_fft_plan(in.data(), out.data(), l);
   plan.execute();
   for (std::size_t j = 0; j < k; ++j) {
     auto slice = input_slice(in, l, j);
     auto ref = ref_c2c<T>(slice);
-    auto got = output_slice(out, l, j, n);
+    auto got = slice_output(out.data(), n, 1, j, n);
     CHECK(allclose(got, ref));
   }
 }
@@ -295,17 +288,17 @@ TEST_CASE("batched c2c into caller buffers, in-place") {
 
   auto buf = random_complex_batch<T>(l, 5);
   auto original = buf;
-  auto plan = make_batch_fft_plan_into(buf.data(), buf.data(), l);
+  auto plan = make_batch_fft_plan(buf.data(), buf.data(), l);
   plan.execute();
   for (std::size_t j = 0; j < k; ++j) {
     auto slice = input_slice(original, l, j);
     auto ref = ref_c2c<T>(slice);
-    auto got = output_slice(buf, l, j, n);
+    auto got = slice_output(buf.data(), alloc, 1, j, n);
     CHECK(allclose(got, ref));
   }
 }
 
-TEST_CASE("batched r2c into caller buffers") {
+TEST_CASE("batched r2c into caller buffers (padded output)") {
   using T = double;
   constexpr std::size_t k = 6, n = 1000, alloc = 1024, out_alloc = 640;
   batch_layout l;
@@ -317,14 +310,14 @@ TEST_CASE("batched r2c into caller buffers") {
   l.odist = out_alloc;
 
   auto in = random_real_batch<T>(l, 11);
-  std::vector<std::complex<T>> out(vec_size(l, false));
-  auto plan = make_batch_rfft_plan_into(in.data(), out.data(), l);
+  std::vector<std::complex<T>> out(k * out_alloc);
+  auto plan = make_batch_rfft_plan(in.data(), out.data(), l);
   plan.execute();
   const std::size_t half = n / 2 + 1;
   for (std::size_t j = 0; j < k; ++j) {
     auto slice = input_slice(in, l, j);
     auto ref = ref_r2c<T>(slice);
-    auto got = output_slice(out, l, j, half);
+    auto got = slice_output(out.data(), out_alloc, 1, j, half);
     CHECK(allclose(got, ref));
   }
 }
@@ -340,21 +333,20 @@ TEST_CASE("batched irfft into caller buffers") {
   l.idist = in_alloc;
 
   auto in = random_complex_batch<T>(l, 13, half);
-  std::vector<T> out(vec_size(l, false));
-  auto plan = make_batch_irfft_plan_into(in.data(), out.data(), l);
-  REQUIRE(out.size() == k * n); // tight real output
+  std::vector<T> out(k * n);
+  auto plan = make_batch_irfft_plan(in.data(), out.data(), l);
   plan.execute();
   for (std::size_t j = 0; j < k; ++j) {
     auto slice = input_slice(in, l, j, half);
     auto ref = ref_c2r<T>(slice, /*odd=*/true);
-    auto got = output_slice(out, l, j, n);
+    auto got = slice_output(out.data(), n, 1, j, n);
     CHECK(allclose(got, ref));
   }
 }
 
 // The batch factories derive rank from layout.n, so rank-2 (batched 2D) needs
 // no extra code; these lock the 2D behaviour in for tight layouts.
-TEST_CASE("batched 2D c2c (tight) matches the FFTW reference") {
+TEST_CASE("batched 2D c2c (owning) matches the FFTW reference") {
   using T = double;
   constexpr std::size_t k = 4, m = 64, n = 48;
   batch_layout l;
@@ -363,12 +355,12 @@ TEST_CASE("batched 2D c2c (tight) matches the FFTW reference") {
 
   auto in = random_complex_batch<T>(l, 21);
   auto plan = make_batch_fft_plan(in.data(), l);
-  REQUIRE(plan.output().size() == k * m * n);
+  REQUIRE(plan.output().shape() == (std::vector<std::size_t>{k, m, n}));
   plan.execute();
   for (std::size_t j = 0; j < k; ++j) {
-    auto slice = to_2d(in.data() + j * dist_of(l, true), m, n);
+    auto slice = to_2d(in.data() + j * dist_of(l), m, n);
     auto ref = ref_c2c<T>(slice);
-    auto got = to_2d(plan.output().data() + j * dist_of(l, false), m, n);
+    auto got = to_2d(plan.output().data() + j * (m * n), m, n);
     CHECK(allclose(got, ref));
   }
 }
@@ -381,13 +373,13 @@ TEST_CASE("batched 2D c2c into caller buffers") {
   l.n = {static_cast<int>(m), static_cast<int>(n)};
 
   auto in = random_complex_batch<T>(l, 21);
-  std::vector<std::complex<T>> out(vec_size(l, false));
-  auto plan = make_batch_fft_plan_into(in.data(), out.data(), l);
+  std::vector<std::complex<T>> out(k * m * n);
+  auto plan = make_batch_fft_plan(in.data(), out.data(), l);
   plan.execute();
   for (std::size_t j = 0; j < k; ++j) {
-    auto slice = to_2d(in.data() + j * dist_of(l, true), m, n);
+    auto slice = to_2d(in.data() + j * dist_of(l), m, n);
     auto ref = ref_c2c<T>(slice);
-    auto got = to_2d(out.data() + j * dist_of(l, false), m, n);
+    auto got = to_2d(out.data() + j * (m * n), m, n);
     CHECK(allclose(got, ref));
   }
 }
@@ -402,13 +394,13 @@ TEST_CASE("batched 2D r2c into caller buffers") {
   l.onembed = {static_cast<int>(m), static_cast<int>(half)};
 
   auto in = random_real_batch<T>(l, 31);
-  std::vector<std::complex<T>> out((k - 1) * m * half + m * half);
-  auto plan = make_batch_rfft_plan_into(in.data(), out.data(), l);
+  std::vector<std::complex<T>> out(k * m * half);
+  auto plan = make_batch_rfft_plan(in.data(), out.data(), l);
   plan.execute();
   for (std::size_t j = 0; j < k; ++j) {
-    auto slice = to_2d(in.data() + j * dist_of(l, true), m, n);
+    auto slice = to_2d(in.data() + j * dist_of(l), m, n);
     auto ref = ref_r2c<T>(slice);
-    auto got = to_2d(out.data() + j * dist_of(l, false), m, half);
+    auto got = to_2d(out.data() + j * (m * half), m, half);
     CHECK(allclose(got, ref));
   }
 }

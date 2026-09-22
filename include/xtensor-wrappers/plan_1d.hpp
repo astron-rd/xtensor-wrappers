@@ -364,17 +364,23 @@ inline basic_plan<T> make_rfft_plan(xt::xarray<T> &input,
 
 /**
  * @brief Creates a plan for an Inverse Real-to-Complex FFT.
+ *
+ * The half-complex input shape cannot encode whether the original real length
+ * was even or odd, so the real output length `n` is passed explicitly (the
+ * input's last dimension is `n.back()/2 + 1`).
+ *
+ * @param n real output dimensions (rank-N), used for both planning and the
+ *        output shape.
  */
 template <class T>
 inline basic_plan<T, T>
 make_irfft_plan(xt::xarray<std::complex<T>> &input, xt::xarray<T> output,
-                bool odd_last_dim = false, unsigned flags = FFTW_ESTIMATE) {
-  output.resize(output_shape_from_input(input, false, true, odd_last_dim));
+                const std::vector<int> &n, unsigned flags = FFTW_ESTIMATE) {
+  output.resize(std::vector<std::size_t>(n.begin(), n.end()));
 
   std::lock_guard<std::mutex> guard(detail::fftw_global_mutex());
-  auto shape = detail::to_int_vector(output.shape());
   auto p = detail::plan_traits<T>::make_c2r(
-      static_cast<int>(shape.size()), shape.data(),
+      static_cast<int>(n.size()), n.data(),
       reinterpret_cast<typename detail::plan_traits<T>::complex_type *>(
           input.data()),
       output.data(), flags);
@@ -409,15 +415,18 @@ inline basic_plan<T> make_fft_plan(xt::xarray<std::complex<T>> &input,
  * @brief Creates a complex-to-complex plan over caller-owned input/output
  *        buffers (any rank).
  *
+ * Overload of `make_fft_plan` that borrows both buffers instead of owning the
+ * output; returns an `external_plan`.
+ *
  * @param in caller-owned input buffer (`n[0]*...*n[rank-1]` complex elements).
  * @param out caller-owned output buffer, same size; may equal `in` for an
  *        in-place transform.
  */
 template <class T>
-inline external_plan<T>
-make_fft_plan_into(std::complex<T> *in, std::complex<T> *out,
-                   const std::vector<int> &n, int direction = FFTW_FORWARD,
-                   unsigned flags = FFTW_ESTIMATE) {
+inline external_plan<T> make_fft_plan(std::complex<T> *in, std::complex<T> *out,
+                                      const std::vector<int> &n,
+                                      int direction = FFTW_FORWARD,
+                                      unsigned flags = FFTW_ESTIMATE) {
   using traits = detail::plan_traits<T>;
   std::lock_guard<std::mutex> guard(detail::fftw_global_mutex());
   auto p = traits::make_c2c(
@@ -430,14 +439,17 @@ make_fft_plan_into(std::complex<T> *in, std::complex<T> *out,
 /**
  * @brief Creates a real-to-complex plan over caller-owned buffers.
  *
+ * Overload of `make_rfft_plan` that borrows both buffers instead of owning the
+ * output; returns an `external_plan`.
+ *
  * @param in caller-owned input buffer (`n` real elements).
  * @param out caller-owned half-complex output buffer (`n/2 + 1` complex
  *        elements per FFTW's convention).
  */
 template <class T>
-inline external_plan<T> make_rfft_plan_into(T *in, std::complex<T> *out,
-                                            const std::vector<int> &n,
-                                            unsigned flags = FFTW_ESTIMATE) {
+inline external_plan<T> make_rfft_plan(T *in, std::complex<T> *out,
+                                       const std::vector<int> &n,
+                                       unsigned flags = FFTW_ESTIMATE) {
   using traits = detail::plan_traits<T>;
   std::lock_guard<std::mutex> guard(detail::fftw_global_mutex());
   auto p = traits::make_r2c(
@@ -449,15 +461,18 @@ inline external_plan<T> make_rfft_plan_into(T *in, std::complex<T> *out,
 /**
  * @brief Creates a complex-to-real plan over caller-owned buffers.
  *
+ * Overload of `make_irfft_plan` that borrows both buffers instead of owning
+ * the output; returns an `external_plan`.
+ *
  * @param in caller-owned half-complex input buffer (`n/2 + 1` complex
  *        elements).
  * @param out caller-owned real output buffer (`n` real elements, must match
  *        the inverse length).
  */
 template <class T>
-inline external_plan<T, T>
-make_irfft_plan_into(std::complex<T> *in, T *out, const std::vector<int> &n,
-                     unsigned flags = FFTW_ESTIMATE) {
+inline external_plan<T, T> make_irfft_plan(std::complex<T> *in, T *out,
+                                           const std::vector<int> &n,
+                                           unsigned flags = FFTW_ESTIMATE) {
   using traits = detail::plan_traits<T>;
   std::lock_guard<std::mutex> guard(detail::fftw_global_mutex());
   auto p = traits::make_c2r(
