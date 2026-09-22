@@ -70,14 +70,16 @@ endif()
 
 # Unit tests. Only the top-level project builds them (and only then does the
 # Catch2 dependency get fetched); a consumer that pulls this library in as a
-# subproject gets the library target and none of the test machinery.
-set(XTENSOR_WRAPPERS_BUILD_TESTS_DEFAULT OFF)
+# subproject gets the library target and none of the test machinery. The option
+# is namespaced (not the generic BUILD_TESTING) so it cannot clash with a
+# parent project's testing option.
+set(XTENSOR_WRAPPERS_BUILD_TESTING_DEFAULT OFF)
 if(PROJECT_IS_TOP_LEVEL)
-  set(XTENSOR_WRAPPERS_BUILD_TESTS_DEFAULT ON)
+  set(XTENSOR_WRAPPERS_BUILD_TESTING_DEFAULT ON)
 endif()
-option(XTENSOR_WRAPPERS_BUILD_TESTS "Build the unit tests"
-       ${XTENSOR_WRAPPERS_BUILD_TESTS_DEFAULT})
-if(XTENSOR_WRAPPERS_BUILD_TESTS)
+option(XTENSOR_WRAPPERS_BUILD_TESTING "Build the unit tests"
+       ${XTENSOR_WRAPPERS_BUILD_TESTING_DEFAULT})
+if(XTENSOR_WRAPPERS_BUILD_TESTING)
   enable_testing()
 
   # Catch2 test framework (Catch2::Catch2WithMain for the test executables)
