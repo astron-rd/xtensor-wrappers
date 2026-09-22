@@ -35,3 +35,6 @@ target_include_directories(xtensor-wrappers
                            INTERFACE "$<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>")
 target_link_libraries(xtensor-wrappers INTERFACE xtensor-fftw PkgConfig::FFTW_DOUBLE)
 target_compile_features(xtensor-wrappers INTERFACE cxx_std_20)
+
+enable_testing()
+add_subdirectory(test)
