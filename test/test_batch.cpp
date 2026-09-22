@@ -344,6 +344,22 @@ TEST_CASE("batched irfft into caller buffers") {
   }
 }
 
+TEST_CASE("owning batch plan rejects a padded output layout") {
+  using T = float;
+  constexpr std::size_t k = 2, n = 64;
+  batch_layout l;
+  l.howmany = k;
+  l.n = {n};
+  l.onembed = {n + 8};
+  l.odist = n + 8; // padded output is only supported by the caller-buffer path
+
+  std::vector<std::complex<T>> in(k * n);
+  REQUIRE_THROWS_AS(make_batch_fft_plan(in.data(), l), std::invalid_argument);
+  REQUIRE_THROWS_AS(make_batch_fft_plan(in.data(), l, FFTW_FORWARD,
+                                        FFTW_ESTIMATE),
+                    std::invalid_argument);
+}
+
 // The batch factories derive rank from layout.n, so rank-2 (batched 2D) needs
 // no extra code; these lock the 2D behaviour in for tight layouts.
 TEST_CASE("batched 2D c2c (owning) matches the FFTW reference") {

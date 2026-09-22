@@ -122,6 +122,18 @@ inline void require_valid_layout(const batch_layout &l) {
   }
 }
 
+// The owning batch factories always produce tightly packed output derived from
+// `n`, so a custom output layout (onembed/ostride/odist) cannot be honoured
+// there; reject it rather than silently ignoring it.
+inline void require_tight_output(const batch_layout &l) {
+  if (!l.onembed.empty() || l.ostride != 1 || l.odist != 0) {
+    throw std::invalid_argument(
+        "XTENSOR-WRAPPERS: owned batch plans always produce tightly packed "
+        "output; leave onembed/ostride/odist unset (or use the caller-buffer "
+        "overload which writes into your buffer) for padded or strided output");
+  }
+}
+
 } // namespace detail
 
 /**
@@ -237,6 +249,7 @@ inline batch_plan<T> make_batch_fft_plan(const std::complex<T> *input,
                                          unsigned flags = FFTW_ESTIMATE) {
   using traits = detail::plan_traits<T>;
   detail::require_valid_layout(layout);
+  detail::require_tight_output(layout);
   auto out_shape = detail::output_shape(layout, /*half=*/false);
   const int out_per = static_cast<int>(detail::product(out_shape));
   const int idist = detail::idist_of(layout);
@@ -298,6 +311,7 @@ inline batch_plan<T> make_batch_rfft_plan(const T *input,
                                           unsigned flags = FFTW_ESTIMATE) {
   using traits = detail::plan_traits<T>;
   detail::require_valid_layout(layout);
+  detail::require_tight_output(layout);
   auto out_shape = detail::output_shape(layout, /*half=*/true);
   const int out_per = static_cast<int>(detail::product(out_shape));
   const int idist = detail::idist_of(layout);
@@ -357,6 +371,7 @@ inline batch_plan<T, T> make_batch_irfft_plan(const std::complex<T> *input,
                                               unsigned flags = FFTW_ESTIMATE) {
   using traits = detail::plan_traits<T>;
   detail::require_valid_layout(layout);
+  detail::require_tight_output(layout);
   auto out_shape = detail::output_shape(layout, /*half=*/false);
   const int out_per = static_cast<int>(detail::product(out_shape));
   const int idist = detail::idist_of(layout);

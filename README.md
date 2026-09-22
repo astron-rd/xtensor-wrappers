@@ -89,6 +89,8 @@ target_link_libraries(myapp xtensor-wrappers)
   be added later; today you write the template parameter explicitly.
 - `batch_plan::output()` is an `xt::xarray` shaped `{howmany}` followed by the
   per-transform output shape (e.g. `{k, n}` for batched 1D c2c), always tightly
-  packed and contiguous. Padded/strided *output* is only available through the
-  caller-buffer overloads (which honour `onembed`/`ostride`/`odist`); padded
-  *input* works in both (`inembed`/`idist`/`istride`).
+  packed and contiguous. The owning batch overloads throw `std::invalid_argument`
+  when a padded/strided output layout is requested (`onembed`/`ostride`/`odist`
+  set); padded/strided *output* is only available through the caller-buffer
+  overloads (which honour those fields). Padded *input* works in both modes
+  (`inembed`/`idist`/`istride`).
