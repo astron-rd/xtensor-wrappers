@@ -1,14 +1,14 @@
 // 2D correctness of the xtensor-wrappers library.
-// Verifies both native rank-2 transforms and the decomposed row/column 
+// Verifies both native rank-2 transforms and the decomposed row/column
 // implementation against raw FFTW references.
 
 #include <catch2/catch_test_macros.hpp>
 #include <stdexcept>
 #include <vector>
 
-#include <xtensor/containers/xarray.hpp>
 #include <xtensor-wrappers/fft2.hpp>
 #include <xtensor-wrappers/plan.hpp>
+#include <xtensor/containers/xarray.hpp>
 
 #include "test_helpers.hpp"
 
@@ -90,26 +90,27 @@ TEST_CASE("2D c2c via the plan wrapper matches FFTW") {
 }
 
 TEST_CASE("2D r2c via the plan wrapper matches FFTW") {
-  check_2d_r2c<float>({6, 8});    // even last dim
-  check_2d_r2c<double>({5, 7});   // odd last dim
+  check_2d_r2c<float>({6, 8});  // even last dim
+  check_2d_r2c<double>({5, 7}); // odd last dim
 }
 
 TEST_CASE("2D irfft via the plan wrapper matches FFTW") {
-  check_2d_irfft<float>({4, 8});   // even inverse size
-  check_2d_irfft<double>({5, 7});  // odd inverse size
+  check_2d_irfft<float>({4, 8});  // even inverse size
+  check_2d_irfft<double>({5, 7}); // odd inverse size
 }
 
 TEST_CASE("plan_fft2 row/column decomposition matches FFTW") {
   check_decomposed<float>({8, 8});
   check_decomposed<float>({7, 5});
   check_decomposed<double>({6, 6});
-  check_decomposed<float>({1, 8});  // single row
-  check_decomposed<float>({8, 1});  // single column
+  check_decomposed<float>({1, 8}); // single row
+  check_decomposed<float>({8, 1}); // single column
   check_decomposed<float>({2, 2});
 }
 
 TEST_CASE("plan_fft2 requires a 2-dimensional input") {
   auto in = random_complex<float>({8});
-  REQUIRE_THROWS_AS(xt::fftw::plan_fft2<float>(in, xt::xarray<std::complex<float>>{}),
-                    std::invalid_argument);
+  REQUIRE_THROWS_AS(
+      xt::fftw::plan_fft2<float>(in, xt::xarray<std::complex<float>>{}),
+      std::invalid_argument);
 }

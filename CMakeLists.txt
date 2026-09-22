@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.14)
-project(xtensor-wrappers VERSION 0.1.0 LANGUAGES CXX)
+project(
+  xtensor-wrappers
+  VERSION 0.1.0
+  LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -33,9 +36,10 @@ include("${CMAKE_SOURCE_DIR}/cmake/FetchXTensor.cmake")
 # fetched xtensor-fftw.
 # ---------------------------------------------------------------------------
 add_library(xtensor-wrappers INTERFACE)
-target_include_directories(xtensor-wrappers
-                           INTERFACE "$<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>")
-target_link_libraries(xtensor-wrappers INTERFACE xtensor-fftw PkgConfig::FFTW_DOUBLE)
+target_include_directories(
+  xtensor-wrappers INTERFACE "$<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>")
+target_link_libraries(xtensor-wrappers INTERFACE xtensor-fftw
+                                                 PkgConfig::FFTW_DOUBLE)
 target_compile_features(xtensor-wrappers INTERFACE cxx_std_20)
 
 enable_testing()

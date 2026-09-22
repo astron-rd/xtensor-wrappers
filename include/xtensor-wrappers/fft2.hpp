@@ -12,7 +12,8 @@
 
 #include <xtensor-wrappers/plan.hpp>
 
-namespace xt { namespace fftw {
+namespace xt {
+namespace fftw {
 
 namespace detail {
 
@@ -22,8 +23,7 @@ namespace detail {
 // xarray: it lets a 2D plan hold one small plan per line length and re-execute
 // it on freshly copied data, so no per-row plans are needed. Move-only and
 // RAII; creation/destruction are guarded by the global FFTW mutex.
-template <class T>
-class fft1_c2c {
+template <class T> class fft1_c2c {
 public:
   using plan_type = typename detail::plan_traits<T>::plan_type;
 
@@ -58,8 +58,7 @@ public:
     std::lock_guard<std::mutex> guard(detail::fftw_global_mutex());
     m_plan = detail::plan_traits<T>::make_c2c(1, &N, c, c, direction, flags);
     if (m_plan == nullptr) {
-      throw std::runtime_error(
-          "XTENSOR-WRAPPERS: FFTW plan creation failed");
+      throw std::runtime_error("XTENSOR-WRAPPERS: FFTW plan creation failed");
     }
   }
 
@@ -103,8 +102,7 @@ private:
  *
  * @tparam T floating precision (`float` or `double`).
  */
-template <class T>
-class plan_fft2 {
+template <class T> class plan_fft2 {
 public:
   using complex_type = std::complex<T>;
   using output_type = xt::xarray<complex_type>;
@@ -124,14 +122,11 @@ public:
    * @param flags FFTW planning flags (default FFTW_ESTIMATE).
    * @throws std::invalid_argument if the input is not 2-dimensional.
    */
-  plan_fft2(xt::xarray<complex_type> &input,
-            xt::xarray<complex_type> output,
-            int direction = FFTW_FORWARD,
-            unsigned flags = FFTW_ESTIMATE)
+  plan_fft2(xt::xarray<complex_type> &input, xt::xarray<complex_type> output,
+            int direction = FFTW_FORWARD, unsigned flags = FFTW_ESTIMATE)
       : m_rows(size0(input)), m_cols(size1(input)), m_input(&input),
         m_output(std::move(output)), m_work(m_rows * m_cols),
-        m_work_t(m_rows * m_cols), m_row_scratch(m_cols),
-        m_col_scratch(m_rows),
+        m_work_t(m_rows * m_cols), m_row_scratch(m_cols), m_col_scratch(m_rows),
         m_row_plan(m_row_scratch.data(), m_cols, direction, flags),
         m_col_plan(m_col_scratch.data(), m_rows, direction, flags) {
     m_output.resize(input.shape());
@@ -219,9 +214,9 @@ private:
  * @brief Convenience wrapper: transforms a 2D array and returns the result.
  */
 template <class T>
-inline xt::xarray<std::complex<T>>
-fft2(xt::xarray<std::complex<T>> &input, int direction = FFTW_FORWARD,
-     unsigned flags = FFTW_ESTIMATE) {
+inline xt::xarray<std::complex<T>> fft2(xt::xarray<std::complex<T>> &input,
+                                        int direction = FFTW_FORWARD,
+                                        unsigned flags = FFTW_ESTIMATE) {
   plan_fft2<T> p(input, xt::xarray<std::complex<T>>{}, direction, flags);
   p.execute();
   return p.release();

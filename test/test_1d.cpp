@@ -9,8 +9,7 @@
 
 #include "test_helpers.hpp"
 
-template <class T>
-static void check_1d_r2c(const std::size_t n) {
+template <class T> static void check_1d_r2c(const std::size_t n) {
   auto in = random_real<T>({n});
   auto ref = ref_r2c(in);
 
@@ -27,8 +26,7 @@ static void check_1d_r2c(const std::size_t n) {
   CHECK(allclose(plan.output(), ref2));
 }
 
-template <class T>
-static void check_1d_c2c(const std::size_t n) {
+template <class T> static void check_1d_c2c(const std::size_t n) {
   auto in = random_complex<T>({n});
   auto ref = ref_c2c<T>(in);
 
@@ -38,8 +36,7 @@ static void check_1d_c2c(const std::size_t n) {
   CHECK(allclose(plan.output(), ref));
 }
 
-template <class T>
-static void check_1d_irfft(const std::size_t n) {
+template <class T> static void check_1d_irfft(const std::size_t n) {
   const bool odd = (n % 2 == 1);
   auto in = random_real<T>({n});
   auto spec = ref_r2c(in); // half-complex spectrum (n/2+1 entries)
@@ -68,7 +65,7 @@ TEST_CASE("1D c2c matches the FFTW reference") {
 }
 
 TEST_CASE("1D irfft reconstructs the real signal") {
-  check_1d_irfft<float>(8);     // even inverse size
-  check_1d_irfft<float>(9);     // odd inverse size
-  check_1d_irfft<double>(127);  // odd inverse size
+  check_1d_irfft<float>(8);    // even inverse size
+  check_1d_irfft<float>(9);    // odd inverse size
+  check_1d_irfft<double>(127); // odd inverse size
 }

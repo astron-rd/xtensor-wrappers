@@ -33,11 +33,14 @@ template <class T> static bool near(T a, T b, T tol) {
   return std::abs(a - b) <= tol * (T(1) + std::abs(a) + std::abs(b));
 }
 
-template <class T> static bool near(const std::complex<T> &a, const std::complex<T> &b) {
+template <class T>
+static bool near(const std::complex<T> &a, const std::complex<T> &b) {
   return near<T>(a, b, tolerance<T>());
 }
 
-template <class T> static bool near(T a, T b) { return near<T>(a, b, tolerance<T>()); }
+template <class T> static bool near(T a, T b) {
+  return near<T>(a, b, tolerance<T>());
+}
 
 template <class T>
 static bool allclose(const xt::xarray<T> &a, const xt::xarray<T> &b) {
@@ -70,8 +73,8 @@ template <class T> static T rand_scalar(unsigned &seed) {
 }
 
 template <class T>
-static xt::xarray<std::complex<T>> random_complex(const std::vector<std::size_t> &shape,
-                                                  unsigned seed = 42) {
+static xt::xarray<std::complex<T>>
+random_complex(const std::vector<std::size_t> &shape, unsigned seed = 42) {
   xt::xarray<std::complex<T>> x(shape);
   for (auto &v : x) {
     v = std::complex<T>(rand_scalar<T>(seed), rand_scalar<T>(seed));
@@ -95,8 +98,8 @@ static xt::xarray<T> random_real(const std::vector<std::size_t> &shape,
 // ---------------------------------------------------------------------------
 
 template <class T>
-static xt::xarray<std::complex<T>>
-ref_c2c(xt::xarray<std::complex<T>> &input, int direction = FFTW_FORWARD) {
+static xt::xarray<std::complex<T>> ref_c2c(xt::xarray<std::complex<T>> &input,
+                                           int direction = FFTW_FORWARD) {
   using traits = xt::fftw::detail::plan_traits<T>;
   xt::xarray<std::complex<T>> out(input.shape());
   std::vector<int> n(input.shape().begin(), input.shape().end());
@@ -142,11 +145,10 @@ static xt::xarray<T> ref_c2r(const xt::xarray<std::complex<T>> &input,
   out.resize(shape);
   std::vector<int> n(shape.begin(), shape.end());
   std::lock_guard<std::mutex> guard(xt::fftw::detail::fftw_global_mutex());
-  auto p = traits::make_c2r(
-      static_cast<int>(n.size()), n.data(),
-      reinterpret_cast<typename traits::complex_type *>(
-          const_cast<std::complex<T> *>(input.data())),
-    out.data(), FFTW_ESTIMATE);
+  auto p = traits::make_c2r(static_cast<int>(n.size()), n.data(),
+                            reinterpret_cast<typename traits::complex_type *>(
+                                const_cast<std::complex<T> *>(input.data())),
+                            out.data(), FFTW_ESTIMATE);
   traits::execute(p);
   traits::destroy_plan(p);
   return out;
