@@ -1,5 +1,5 @@
-#ifndef XTENSOR_WRAPPERS_FFT2_HPP
-#define XTENSOR_WRAPPERS_FFT2_HPP
+#ifndef XTENSOR_WRAPPERS_PLAN_2D_HPP
+#define XTENSOR_WRAPPERS_PLAN_2D_HPP
 
 #include <algorithm>
 #include <complex>
@@ -10,7 +10,7 @@
 
 #include <xtensor/containers/xarray.hpp>
 
-#include <xtensor-wrappers/plan.hpp>
+#include <xtensor-wrappers/plan_1d.hpp>
 
 namespace xt::fftw {
 namespace detail {
@@ -219,4 +219,4 @@ inline xt::xarray<std::complex<T>> fft2(xt::xarray<std::complex<T>> &input,
 }
 
 } // namespace xt::fftw
-#endif // XTENSOR_WRAPPERS_FFT2_HPP
+#endif // XTENSOR_WRAPPERS_PLAN_2D_HPP

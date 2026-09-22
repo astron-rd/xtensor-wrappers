@@ -6,7 +6,6 @@
 #include <stdexcept>
 #include <vector>
 
-#include <xtensor-wrappers/fft2.hpp>
 #include <xtensor-wrappers/plan.hpp>
 #include <xtensor/containers/xarray.hpp>
 

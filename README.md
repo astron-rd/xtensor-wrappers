@@ -32,14 +32,14 @@ ctest --test-dir build --output-on-failure
 
 | Header | Purpose |
 | ------ | ------- |
-| `include/xtensor-wrappers/plan.hpp` | Plan-based FFTW API for xtensor-fftw: `basic_plan<T>`, `make_rfft_plan()`, `make_irfft_plan()`, `make_fft_plan()`, `plan_float`/`plan_double`. N-D, move-only, RAII, thread-safe plan creation. `xt::fftw` namespace, so it slots in alongside xtensor-fftw. |
-| `include/xtensor-wrappers/fft2.hpp` | `plan_fft2<T>` and `fft2()`: 2D complex FFT decomposed into 1D FFTs over rows and columns (separable transform), with a transpose between passes. |
+| `include/xtensor-wrappers/plan.hpp` | Umbrella header: includes `plan_1d.hpp` and `plan_2d.hpp`. |
+| `include/xtensor-wrappers/plan_1d.hpp` | Plan-based FFTW API for xtensor-fftw: `basic_plan<T>`, `make_rfft_plan()`, `make_irfft_plan()`, `make_fft_plan()`, `plan_float`/`plan_double`, plus the plan machinery (`plan_traits`, thread-safe creation). N-D, move-only, RAII. `xt::fftw` namespace, so it slots in alongside xtensor-fftw. |
+| `include/xtensor-wrappers/plan_2d.hpp` | `plan_fft2<T>` and `fft2()`: 2D complex FFT decomposed into 1D FFTs over rows and columns (separable transform), with a transpose between passes. |
 
 ## Using the library
 
 ```cpp
 #include <xtensor-wrappers/plan.hpp>
-#include <xtensor-wrappers/fft2.hpp>
 
 // Plan-based N-D FFT; the plan owns its output buffer.
 xt::xarray<std::complex<float>> input = ...;
