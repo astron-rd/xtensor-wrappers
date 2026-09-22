@@ -32,9 +32,9 @@ ctest --test-dir build --output-on-failure
 
 | Header | Purpose |
 | ------ | ------- |
-| `include/xtensor-wrappers/plan.hpp` | Umbrella header: includes `plan_1d.hpp` and `plan_2d.hpp`. |
-| `include/xtensor-wrappers/plan_1d.hpp` | Plan-based FFTW API for xtensor-fftw: `basic_plan<T>`, `make_rfft_plan()`, `make_irfft_plan()`, `make_fft_plan()`, `plan_float`/`plan_double`, plus the plan machinery (`plan_traits`, thread-safe creation). N-D, move-only, RAII. `xt::fftw` namespace, so it slots in alongside xtensor-fftw. |
-| `include/xtensor-wrappers/plan_2d.hpp` | `plan_fft2<T>` and `fft2()`: 2D complex FFT decomposed into 1D FFTs over rows and columns (separable transform), with a transpose between passes. |
+| `include/xtensor-wrappers/plan.hpp` | Umbrella header: includes `plan_1d.hpp` and `plan_batch.hpp`. |
+| `include/xtensor-wrappers/plan_1d.hpp` | Plan-based FFTW API for xtensor-fftw: `basic_plan<T>` (owns its output) and `external_plan<T>` (transforms between caller-owned buffers), `make_rfft_plan()`/`make_irfft_plan()`/`make_fft_plan()` and their `*_into()` counterparts, `plan_float`/`plan_double`, plus the plan machinery (`plan_traits`, thread-safe creation). Rank-generic — 1D through N-D, 2D included — and move-only RAII in the `xt::fftw` namespace. |
+| `include/xtensor-wrappers/plan_batch.hpp` | `batch_plan<T>`/`make_batch_*_plan()`: howmany identical transforms over strided memory via FFTW's guru (`plan_many`) interface, with per-direction padding/strides (`batch_layout`) and owned-output plus `*_into` caller-buffer variants. |
 
 ## Using the library
 
@@ -47,8 +47,10 @@ auto plan = xt::fftw::make_fft_plan(input, xt::xarray<std::complex<float>>{});
 plan.execute();
 // plan.output() holds the result; call plan.execute() again for new input data.
 
-// 2D transform decomposed into 1D row/column FFTs.
-auto out2 = xt::fftw::fft2(input2d);
+// Same transform into caller-owned buffers (2D shown; rank-generic).
+std::vector<std::complex<float>> out(m * n);
+auto p = xt::fftw::make_fft_plan_into(input.data(), out.data(), {m, n});
+p.execute();
 ```
 
 Consumers link the target and get the whole dependency tree:
@@ -64,6 +66,6 @@ target_link_libraries(myapp xtensor-wrappers)
   not thread-safe); execution needs no lock (FFTW >= 3.3.5).
 - FFTW plan-creation failure is reported at runtime (`std::runtime_error`), not
   via assertions that compile out of Release builds.
-- The input array passed to `make_*_plan()`/`plan_fft2` must outlive the plan
+- The input array passed to `make_*_plan()` must outlive the plan
   and must not be reallocated while the plan is alive; the output buffer is
-  owned by the plan.
+  owned by the plan (borrowing variants: `external_plan`, `*_into`).
