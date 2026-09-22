@@ -37,7 +37,7 @@ if(NOT TARGET xtensor-fftw)
   # single-precision FFTW. FetchXTensor.cmake links against PkgConfig::FFTW.
   pkg_search_module(FFTW REQUIRED fftw3f IMPORTED_TARGET)
   set(XTENSOR_LIBRARIES xtensor xtensor-fftw)
-  include("${CMAKE_SOURCE_DIR}/cmake/FetchXTensor.cmake")
+  include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/FetchXTensor.cmake")
 endif()
 
 # ---------------------------------------------------------------------------
@@ -45,8 +45,11 @@ endif()
 # provided xtensor-fftw.
 # ---------------------------------------------------------------------------
 add_library(xtensor-wrappers INTERFACE)
+# CMAKE_CURRENT_SOURCE_DIR, not CMAKE_SOURCE_DIR: the latter is the parent
+# project's source dir when this library is consumed as a subproject.
 target_include_directories(
-  xtensor-wrappers INTERFACE "$<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>")
+  xtensor-wrappers INTERFACE
+  "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>")
 # xtensor is linked explicitly (not just via xtensor-fftw): the public API is
 # built on xt::xarray, and a consumer's xtensor-fftw target may not carry the
 # xtensor include path transitively.
