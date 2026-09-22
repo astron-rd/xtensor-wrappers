@@ -87,6 +87,27 @@ inline int odist_of(const batch_layout &l) {
                  : static_cast<int>(elements_per_transform(l, l.onembed));
 }
 
+// Tight input size of one transform for a c2r (irfft) batch, in input
+// (half-complex) elements: all dimensions keep their real size except the last,
+// which holds n/2 + 1 values.
+inline std::size_t half_complex_input_size(const batch_layout &l) {
+  std::size_t p = 1;
+  for (std::size_t i = 0; i + 1 < l.n.size(); ++i) {
+    p *= static_cast<std::size_t>(l.n[i]);
+  }
+  p *= static_cast<std::size_t>(l.n.back() / 2 + 1);
+  return p;
+}
+
+// Distance between consecutive c2r (irfft) input transforms, in input
+// (half-complex) elements. Unlike the c2c/r2c case the tight default is NOT
+// the real transform size: the input rows are half_complex_input_size(l)
+// apart, so the plain idist_of() machinery must not be used here.
+inline int idist_c2r_of(const batch_layout &l) {
+  return l.idist ? static_cast<int>(l.idist)
+                 : static_cast<int>(half_complex_input_size(l));
+}
+
 // Tight logical output shape of one transform: `l.n`, with the last dimension
 // turned into the r2c half-complex size when `half` is set.
 inline std::vector<int> output_shape(const batch_layout &l, bool half) {
@@ -489,7 +510,7 @@ inline batch_plan<T, T> make_batch_irfft_plan(const std::complex<T> *input,
   detail::require_tight_output(layout);
   auto out_shape = detail::output_shape(layout, /*half=*/false);
   const int out_per = static_cast<int>(detail::product(out_shape));
-  const int idist = detail::idist_of(layout);
+  const int idist = detail::idist_c2r_of(layout);
   const int ostride = 1;
   auto output = detail::owned_output<T>(out_shape, layout.howmany);
 
@@ -526,7 +547,7 @@ make_batch_irfft_plan(std::complex<T> *input, T *output,
   using real_type = typename traits::real_type;
   using complex_type = typename traits::complex_type;
   detail::require_valid_layout(layout);
-  const int idist = detail::idist_of(layout);
+  const int idist = detail::idist_c2r_of(layout);
   const int odist = detail::odist_of(layout);
   const int ostride = layout.ostride;
 

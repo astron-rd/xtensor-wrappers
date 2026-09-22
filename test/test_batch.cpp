@@ -252,6 +252,42 @@ TEST_CASE("batched irfft reconstructs the real signal") {
   }
 }
 
+// Tight layout: with idist/inembed left at their defaults the c2r factory must
+// derive the input distance from the half-complex input size (n/2+1), not the
+// real transform size n.
+TEST_CASE("batched irfft: tight half-complex input") {
+  using T = float;
+  constexpr std::size_t k = 5, n = 257;
+  const std::size_t half = n / 2 + 1;
+
+  // Tightly packed half-complex rows: row j starts at j * half.
+  std::vector<std::complex<T>> in(k * half);
+  std::mt19937 rng(17);
+  std::uniform_real_distribution<T> dist(T(-100), T(100));
+  for (std::size_t j = 0; j < k; ++j) {
+    for (std::size_t i = 0; i < half; ++i) {
+      in[j * half + i] = {dist(rng), dist(rng)};
+    }
+  }
+
+  batch_layout l;
+  l.howmany = k;
+  l.n = {static_cast<int>(n)};
+
+  auto plan = make_batch_irfft_plan(in.data(), l);
+  REQUIRE(plan.output().shape() == std::vector<std::size_t>{k, n});
+  plan.execute();
+  for (std::size_t j = 0; j < k; ++j) {
+    xt::xarray<std::complex<T>> slice(std::vector<std::size_t>{half});
+    for (std::size_t i = 0; i < half; ++i) {
+      slice(i) = in[j * half + i];
+    }
+    auto ref = ref_c2r<T>(slice, /*odd=*/true);
+    auto out = slice_output(plan.output().data(), n, 1, j, n);
+    CHECK(allclose(out, ref));
+  }
+}
+
 // Caller-buffer overloads: make_batch_*_plan(input, output, layout, ...) writes
 // into the user's buffer; the output layout (onembed/ostride/odist) is honored.
 TEST_CASE("batched c2c into caller buffers") {
