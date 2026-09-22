@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <mutex>
+#include <random>
 #include <vector>
 
 #include <xtensor/containers/xarray.hpp>
@@ -63,31 +64,32 @@ static bool allclose(const xt::xarray<std::complex<T>> &a,
                     });
 }
 
-// Deterministic pseudo-random data (LCG), scaled to [-100, 100]. The modulo
-// must be cast to a signed type before subtracting, otherwise the subtraction
-// wraps in unsigned arithmetic and yields huge garbage values.
-template <class T> static T rand_scalar(unsigned &seed) {
-  seed = seed * 1664525u + 1013904223u;
-  const int value = static_cast<int>(seed % 200000u) - 100000;
-  return static_cast<T>(value) / static_cast<T>(1000);
+// Deterministic pseudo-random data in [-100, 100], drawn from the C++ standard
+// RNG (std::mt19937) seeded with a fixed seed so test data is reproducible.
+template <class T> static T random_in_range(std::mt19937 &rng) {
+  std::uniform_real_distribution<T> dist(T(-100), T(100));
+  return dist(rng);
 }
 
 template <class T>
 static xt::xarray<std::complex<T>>
-random_complex(const std::vector<std::size_t> &shape, unsigned seed = 42) {
+random_complex(const std::vector<std::size_t> &shape,
+               std::mt19937::result_type seed = 42) {
+  std::mt19937 rng(seed);
   xt::xarray<std::complex<T>> x(shape);
   for (auto &v : x) {
-    v = std::complex<T>(rand_scalar<T>(seed), rand_scalar<T>(seed));
+    v = std::complex<T>(random_in_range<T>(rng), random_in_range<T>(rng));
   }
   return x;
 }
 
 template <class T>
 static xt::xarray<T> random_real(const std::vector<std::size_t> &shape,
-                                 unsigned seed = 7) {
+                                 std::mt19937::result_type seed = 7) {
+  std::mt19937 rng(seed);
   xt::xarray<T> x(shape);
   for (auto &v : x) {
-    v = rand_scalar<T>(seed);
+    v = random_in_range<T>(rng);
   }
   return x;
 }
