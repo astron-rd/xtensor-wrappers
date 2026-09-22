@@ -5,6 +5,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <complex>
 #include <cstddef>
 #include <random>
@@ -124,6 +125,23 @@ xt::xarray<T> output_slice(const std::vector<T> &out, const batch_layout &l,
   for (std::size_t i = 0; i < count; ++i) {
     x(i) = base[i * stride];
   }
+  return x;
+}
+
+// Copy m*n contiguous row-major complex values into a 2D array; used for the
+// per-transform slices of a rank-2 batch (tight layout, unit stride).
+template <class T>
+xt::xarray<std::complex<T>> to_2d(const std::complex<T> *base, std::size_t m,
+                                  std::size_t n) {
+  xt::xarray<std::complex<T>> x(std::vector<std::size_t>{m, n});
+  std::copy_n(base, m * n, x.begin());
+  return x;
+}
+
+template <class T>
+xt::xarray<T> to_2d(const T *base, std::size_t m, std::size_t n) {
+  xt::xarray<T> x(std::vector<std::size_t>{m, n});
+  std::copy_n(base, m * n, x.begin());
   return x;
 }
 
@@ -330,6 +348,67 @@ TEST_CASE("batched irfft into caller buffers") {
     auto slice = input_slice(in, l, j, half);
     auto ref = ref_c2r<T>(slice, /*odd=*/true);
     auto got = output_slice(out, l, j, n);
+    CHECK(allclose(got, ref));
+  }
+}
+
+// The batch factories derive rank from layout.n, so rank-2 (batched 2D) needs
+// no extra code; these lock the 2D behaviour in for tight layouts.
+TEST_CASE("batched 2D c2c (tight) matches the FFTW reference") {
+  using T = double;
+  constexpr std::size_t k = 4, m = 64, n = 48;
+  batch_layout l;
+  l.howmany = k;
+  l.n = {static_cast<int>(m), static_cast<int>(n)};
+
+  auto in = random_complex_batch<T>(l, 21);
+  auto plan = make_batch_fft_plan(in.data(), l);
+  REQUIRE(plan.output().size() == k * m * n);
+  plan.execute();
+  for (std::size_t j = 0; j < k; ++j) {
+    auto slice = to_2d(in.data() + j * dist_of(l, true), m, n);
+    auto ref = ref_c2c<T>(slice);
+    auto got = to_2d(plan.output().data() + j * dist_of(l, false), m, n);
+    CHECK(allclose(got, ref));
+  }
+}
+
+TEST_CASE("batched 2D c2c into caller buffers") {
+  using T = double;
+  constexpr std::size_t k = 4, m = 64, n = 48;
+  batch_layout l;
+  l.howmany = k;
+  l.n = {static_cast<int>(m), static_cast<int>(n)};
+
+  auto in = random_complex_batch<T>(l, 21);
+  std::vector<std::complex<T>> out(vec_size(l, false));
+  auto plan = make_batch_fft_plan_into(in.data(), out.data(), l);
+  plan.execute();
+  for (std::size_t j = 0; j < k; ++j) {
+    auto slice = to_2d(in.data() + j * dist_of(l, true), m, n);
+    auto ref = ref_c2c<T>(slice);
+    auto got = to_2d(out.data() + j * dist_of(l, false), m, n);
+    CHECK(allclose(got, ref));
+  }
+}
+
+TEST_CASE("batched 2D r2c into caller buffers") {
+  using T = double;
+  constexpr std::size_t k = 3, m = 32, n = 40;
+  const std::size_t half = n / 2 + 1;
+  batch_layout l;
+  l.howmany = k;
+  l.n = {static_cast<int>(m), static_cast<int>(n)};
+  l.onembed = {static_cast<int>(m), static_cast<int>(half)};
+
+  auto in = random_real_batch<T>(l, 31);
+  std::vector<std::complex<T>> out((k - 1) * m * half + m * half);
+  auto plan = make_batch_rfft_plan_into(in.data(), out.data(), l);
+  plan.execute();
+  for (std::size_t j = 0; j < k; ++j) {
+    auto slice = to_2d(in.data() + j * dist_of(l, true), m, n);
+    auto ref = ref_r2c<T>(slice);
+    auto got = to_2d(out.data() + j * dist_of(l, false), m, half);
     CHECK(allclose(got, ref));
   }
 }
