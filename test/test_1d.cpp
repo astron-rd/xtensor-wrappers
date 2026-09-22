@@ -3,6 +3,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <complex>
+#include <cstddef>
+#include <vector>
+
 #include <xtensor/containers/xarray.hpp>
 
 #include <xtensor-wrappers/plan.hpp>
@@ -68,4 +73,78 @@ TEST_CASE("1D irfft reconstructs the real signal") {
   check_1d_irfft<float>(8);    // even inverse size
   check_1d_irfft<float>(9);    // odd inverse size
   check_1d_irfft<double>(127); // odd inverse size
+}
+
+// The external-buffer ("into") variants write into caller-owned buffers.
+namespace {
+template <class T> static void check_1d_c2c_external(const std::size_t n) {
+  auto in = random_complex<T>({n});
+  auto ref = ref_c2c<T>(in);
+
+  std::vector<std::complex<T>> out(n);
+  auto p = xt::fftw::make_fft_plan_into(in.data(), out.data(),
+                                        {static_cast<int>(n)});
+  p.execute();
+
+  xt::xarray<std::complex<T>> o(std::vector<std::size_t>{n});
+  std::copy_n(out.begin(), n, o.begin());
+  CHECK(allclose(o, ref));
+}
+
+template <class T> static void check_1d_r2c_external(const std::size_t n) {
+  auto in = random_real<T>({n});
+  auto ref = ref_r2c(in);
+  const std::size_t half = n / 2 + 1;
+
+  std::vector<std::complex<T>> out(half);
+  auto p = xt::fftw::make_rfft_plan_into(in.data(), out.data(),
+                                         {static_cast<int>(n)});
+  p.execute();
+
+  xt::xarray<std::complex<T>> o(std::vector<std::size_t>{half});
+  std::copy_n(out.begin(), half, o.begin());
+  CHECK(allclose(o, ref));
+}
+
+template <class T> static void check_1d_irfft_external(const std::size_t n) {
+  const bool odd = (n % 2 == 1);
+  const std::size_t half = n / 2 + 1;
+  auto in = random_complex<T>({half});
+  auto ref = ref_c2r<T>(in, odd);
+
+  std::vector<T> out(n);
+  auto p = xt::fftw::make_irfft_plan_into(in.data(), out.data(),
+                                          {static_cast<int>(n)});
+  p.execute();
+
+  xt::xarray<T> o(std::vector<std::size_t>{n});
+  std::copy_n(out.begin(), n, o.begin());
+  CHECK(allclose(o, ref));
+}
+
+template <class T> static void check_1d_c2c_inplace(const std::size_t n) {
+  auto in = random_complex<T>({n});
+  auto ref = ref_c2c<T>(in);
+
+  std::vector<std::complex<T>> buf(in.begin(), in.end());
+  auto p = xt::fftw::make_fft_plan_into(buf.data(), buf.data(),
+                                        {static_cast<int>(n)});
+  p.execute();
+
+  xt::xarray<std::complex<T>> o(std::vector<std::size_t>{n});
+  std::copy_n(buf.begin(), n, o.begin());
+  CHECK(allclose(o, ref));
+}
+} // namespace
+
+TEST_CASE("1D external buffers match the FFTW reference") {
+  check_1d_c2c_external<double>(1000);
+  check_1d_r2c_external<float>(16);
+  check_1d_r2c_external<double>(100);
+  check_1d_irfft_external<double>(257);
+}
+
+TEST_CASE("1D c2c in-place over a caller buffer") {
+  check_1d_c2c_inplace<float>(128);
+  check_1d_c2c_inplace<double>(63);
 }

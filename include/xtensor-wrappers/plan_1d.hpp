@@ -253,6 +253,92 @@ private:
 };
 
 /**
+ * @brief A plan that transforms between two caller-owned buffers.
+ *
+ * The counterpart of `basic_plan`: instead of owning an output array, the plan
+ * borrows BOTH the input and output buffers (raw pointers) and writes straight
+ * into the output on `execute()`. Use this when the buffers must live somewhere
+ * the library cannot allocate (pinned, page-locked or file-backed memory, GPU
+ * staging) or must be managed by the caller for the whole plan lifetime.
+ *
+ * The caller owns both buffers and must keep them valid and correctly sized for
+ * as long as the plan exists; the plan never resizes, reallocates or frees
+ * them. A too-small output buffer is the caller's fault (FFTW writes past its
+ * end), unlike `basic_plan` which sizes its own output. Passing the same buffer
+ * for input and output is allowed (in-place transform).
+ *
+ * Move-only RAII wrapper around the FFTW handle; planning is guarded by the
+ * global mutex, `execute()` needs no lock (FFTW >= 3.3.5 execution is
+ * thread-safe).
+ *
+ * @tparam T floating precision (`float` or `double`).
+ * @tparam StoredT element type of the output buffer: `std::complex<T>` for
+ *         C2C/R2C plans, `T` for C2R plans.
+ */
+template <class T, class StoredT = std::complex<T>> class external_plan {
+public:
+  using traits = detail::plan_traits<T>;
+  using plan_type = typename traits::plan_type;
+
+  external_plan() = default;
+
+  external_plan(const external_plan &) = delete;
+  external_plan &operator=(const external_plan &) = delete;
+
+  external_plan(external_plan &&other) noexcept : m_plan(other.m_plan) {
+    other.m_plan = nullptr;
+  }
+
+  external_plan &operator=(external_plan &&other) noexcept {
+    if (this != &other) {
+      std::lock_guard<std::mutex> guard(detail::fftw_global_mutex());
+      if (m_plan) {
+        traits::destroy_plan(m_plan);
+      }
+      m_plan = other.m_plan;
+      other.m_plan = nullptr;
+    }
+    return *this;
+  }
+
+  /**
+   * @brief Takes ownership of a raw FFTW plan over caller buffers.
+   *
+   * @throws std::runtime_error if `p` is null (planner failure).
+   */
+  explicit external_plan(plan_type p) : m_plan(p) {
+    if (p == nullptr) {
+      throw std::runtime_error("XTENSOR-WRAPPERS: FFTW plan creation failed");
+    }
+  }
+
+  ~external_plan() {
+    if (m_plan) {
+      std::lock_guard<std::mutex> guard(detail::fftw_global_mutex());
+      traits::destroy_plan(m_plan);
+    }
+  }
+
+  /**
+   * @brief Executes the transform into the caller-provided output buffer.
+   *
+   * @warning Both buffers passed to the factory must remain valid and must not
+   * be relocated until this plan is destroyed.
+   */
+  void execute() const {
+    XTENSOR_FFTW_ASSERT(
+        m_plan != nullptr &&
+        "execute() on a default-constructed or moved-from external plan");
+    traits::execute(m_plan);
+  }
+
+  plan_type get() const noexcept { return m_plan; }
+
+private:
+  plan_type m_plan = nullptr;
+};
+
+/**
  * @brief Creates a plan for a Real-to-Complex FFT.
  *
  * @param output passed by value on purpose: the plan takes ownership of its
@@ -317,6 +403,67 @@ inline basic_plan<T> make_fft_plan(xt::xarray<std::complex<T>> &input,
       direction, flags);
 
   return basic_plan<T>(p, std::move(output));
+}
+
+/**
+ * @brief Creates a complex-to-complex plan over caller-owned input/output
+ *        buffers (any rank).
+ *
+ * @param in caller-owned input buffer (`n[0]*...*n[rank-1]` complex elements).
+ * @param out caller-owned output buffer, same size; may equal `in` for an
+ *        in-place transform.
+ */
+template <class T>
+inline external_plan<T>
+make_fft_plan_into(std::complex<T> *in, std::complex<T> *out,
+                   const std::vector<int> &n, int direction = FFTW_FORWARD,
+                   unsigned flags = FFTW_ESTIMATE) {
+  using traits = detail::plan_traits<T>;
+  std::lock_guard<std::mutex> guard(detail::fftw_global_mutex());
+  auto p = traits::make_c2c(
+      static_cast<int>(n.size()), n.data(),
+      reinterpret_cast<typename traits::complex_type *>(in),
+      reinterpret_cast<typename traits::complex_type *>(out), direction, flags);
+  return external_plan<T>(p);
+}
+
+/**
+ * @brief Creates a real-to-complex plan over caller-owned buffers.
+ *
+ * @param in caller-owned input buffer (`n` real elements).
+ * @param out caller-owned half-complex output buffer (`n/2 + 1` complex
+ *        elements per FFTW's convention).
+ */
+template <class T>
+inline external_plan<T> make_rfft_plan_into(T *in, std::complex<T> *out,
+                                            const std::vector<int> &n,
+                                            unsigned flags = FFTW_ESTIMATE) {
+  using traits = detail::plan_traits<T>;
+  std::lock_guard<std::mutex> guard(detail::fftw_global_mutex());
+  auto p = traits::make_r2c(
+      static_cast<int>(n.size()), n.data(), in,
+      reinterpret_cast<typename traits::complex_type *>(out), flags);
+  return external_plan<T>(p);
+}
+
+/**
+ * @brief Creates a complex-to-real plan over caller-owned buffers.
+ *
+ * @param in caller-owned half-complex input buffer (`n/2 + 1` complex
+ *        elements).
+ * @param out caller-owned real output buffer (`n` real elements, must match
+ *        the inverse length).
+ */
+template <class T>
+inline external_plan<T, T>
+make_irfft_plan_into(std::complex<T> *in, T *out, const std::vector<int> &n,
+                     unsigned flags = FFTW_ESTIMATE) {
+  using traits = detail::plan_traits<T>;
+  std::lock_guard<std::mutex> guard(detail::fftw_global_mutex());
+  auto p = traits::make_c2r(
+      static_cast<int>(n.size()), n.data(),
+      reinterpret_cast<typename traits::complex_type *>(in), out, flags);
+  return external_plan<T, T>(p);
 }
 
 using plan_float = basic_plan<float>;

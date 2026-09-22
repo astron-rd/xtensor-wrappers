@@ -184,16 +184,16 @@ private:
  *        elements).
  */
 template <class T>
-inline batch_plan<T>
-make_batch_fft_plan(const std::complex<T> *input, const batch_layout &layout,
-                    int direction = FFTW_FORWARD,
-                    unsigned flags = FFTW_ESTIMATE) {
+inline batch_plan<T> make_batch_fft_plan(const std::complex<T> *input,
+                                         const batch_layout &layout,
+                                         int direction = FFTW_FORWARD,
+                                         unsigned flags = FFTW_ESTIMATE) {
   using traits = detail::plan_traits<T>;
   detail::require_valid_layout(layout);
-  const int in_per = static_cast<int>(
-      detail::elements_per_transform(layout, layout.inembed));
-  const int out_per = static_cast<int>(
-      detail::elements_per_transform(layout, layout.onembed));
+  const int in_per =
+      static_cast<int>(detail::elements_per_transform(layout, layout.inembed));
+  const int out_per =
+      static_cast<int>(detail::elements_per_transform(layout, layout.onembed));
   const int idist = layout.idist ? static_cast<int>(layout.idist) : in_per;
   const int odist = layout.odist ? static_cast<int>(layout.odist) : out_per;
 
@@ -205,11 +205,10 @@ make_batch_fft_plan(const std::complex<T> *input, const batch_layout &layout,
       static_cast<int>(layout.howmany),
       reinterpret_cast<typename traits::complex_type *>(
           const_cast<std::complex<T> *>(input)),
-      layout.inembed.empty() ? nullptr : layout.inembed.data(),
-      layout.istride, idist,
-      reinterpret_cast<typename traits::complex_type *>(output.data()),
-      layout.onembed.empty() ? nullptr : layout.onembed.data(),
-      layout.ostride, odist, direction, flags);
+      layout.inembed.empty() ? nullptr : layout.inembed.data(), layout.istride,
+      idist, reinterpret_cast<typename traits::complex_type *>(output.data()),
+      layout.onembed.empty() ? nullptr : layout.onembed.data(), layout.ostride,
+      odist, direction, flags);
 
   return batch_plan<T>(p, std::move(output));
 }
@@ -223,15 +222,15 @@ make_batch_fft_plan(const std::complex<T> *input, const batch_layout &layout,
  * r2c output. For a tight r2c output, pass `onembed = {n / 2 + 1}`.
  */
 template <class T>
-inline batch_plan<T>
-make_batch_rfft_plan(const T *input, const batch_layout &layout,
-                     unsigned flags = FFTW_ESTIMATE) {
+inline batch_plan<T> make_batch_rfft_plan(const T *input,
+                                          const batch_layout &layout,
+                                          unsigned flags = FFTW_ESTIMATE) {
   using traits = detail::plan_traits<T>;
   detail::require_valid_layout(layout);
-  const int in_per = static_cast<int>(
-      detail::elements_per_transform(layout, layout.inembed));
-  const int out_per = static_cast<int>(
-      detail::elements_per_transform(layout, layout.onembed));
+  const int in_per =
+      static_cast<int>(detail::elements_per_transform(layout, layout.inembed));
+  const int out_per =
+      static_cast<int>(detail::elements_per_transform(layout, layout.onembed));
   const int idist = layout.idist ? static_cast<int>(layout.idist) : in_per;
   const int odist = layout.odist ? static_cast<int>(layout.odist) : out_per;
 
@@ -241,11 +240,10 @@ make_batch_rfft_plan(const T *input, const batch_layout &layout,
   auto p = traits::make_many_r2c(
       static_cast<int>(layout.n.size()), layout.n.data(),
       static_cast<int>(layout.howmany), const_cast<T *>(input),
-      layout.inembed.empty() ? nullptr : layout.inembed.data(),
-      layout.istride, idist,
-      reinterpret_cast<typename traits::complex_type *>(output.data()),
-      layout.onembed.empty() ? nullptr : layout.onembed.data(),
-      layout.ostride, odist, flags);
+      layout.inembed.empty() ? nullptr : layout.inembed.data(), layout.istride,
+      idist, reinterpret_cast<typename traits::complex_type *>(output.data()),
+      layout.onembed.empty() ? nullptr : layout.onembed.data(), layout.ostride,
+      odist, flags);
 
   return batch_plan<T>(p, std::move(output));
 }
@@ -258,15 +256,15 @@ make_batch_rfft_plan(const T *input, const batch_layout &layout,
  * padded via `inembed`/`idist`); output is real.
  */
 template <class T>
-inline batch_plan<T, T>
-make_batch_irfft_plan(const std::complex<T> *input, const batch_layout &layout,
-                      unsigned flags = FFTW_ESTIMATE) {
+inline batch_plan<T, T> make_batch_irfft_plan(const std::complex<T> *input,
+                                              const batch_layout &layout,
+                                              unsigned flags = FFTW_ESTIMATE) {
   using traits = detail::plan_traits<T>;
   detail::require_valid_layout(layout);
-  const int in_per = static_cast<int>(
-      detail::elements_per_transform(layout, layout.inembed));
-  const int out_per = static_cast<int>(
-      detail::elements_per_transform(layout, layout.onembed));
+  const int in_per =
+      static_cast<int>(detail::elements_per_transform(layout, layout.inembed));
+  const int out_per =
+      static_cast<int>(detail::elements_per_transform(layout, layout.onembed));
   const int idist = layout.idist ? static_cast<int>(layout.idist) : in_per;
   const int odist = layout.odist ? static_cast<int>(layout.odist) : out_per;
 
@@ -278,12 +276,118 @@ make_batch_irfft_plan(const std::complex<T> *input, const batch_layout &layout,
       static_cast<int>(layout.howmany),
       reinterpret_cast<typename traits::complex_type *>(
           const_cast<std::complex<T> *>(input)),
-      layout.inembed.empty() ? nullptr : layout.inembed.data(),
-      layout.istride, idist, output.data(),
-      layout.onembed.empty() ? nullptr : layout.onembed.data(),
-      layout.ostride, odist, flags);
+      layout.inembed.empty() ? nullptr : layout.inembed.data(), layout.istride,
+      idist, output.data(),
+      layout.onembed.empty() ? nullptr : layout.onembed.data(), layout.ostride,
+      odist, flags);
 
   return batch_plan<T, T>(p, std::move(output));
+}
+
+/**
+ * @brief Creates a batched complex-to-complex plan over caller-owned input and
+ *        output buffers.
+ *
+ * The counterpart of `make_batch_fft_plan()` that writes into a caller buffer
+ * instead of an owned one: both buffers must stay valid and be sized for the
+ * layout footprint (`howmany * odist`, or `out_per` for the last transform;
+ * see batch_plan's output sizing). `output == input` performs an in-place
+ * batch.
+ */
+template <class T>
+inline external_plan<T> make_batch_fft_plan_into(
+    std::complex<T> *input, std::complex<T> *output, const batch_layout &layout,
+    int direction = FFTW_FORWARD, unsigned flags = FFTW_ESTIMATE) {
+  using traits = detail::plan_traits<T>;
+  detail::require_valid_layout(layout);
+  const int idist = layout.idist
+                        ? static_cast<int>(layout.idist)
+                        : static_cast<int>(detail::elements_per_transform(
+                              layout, layout.inembed));
+  const int odist = layout.odist
+                        ? static_cast<int>(layout.odist)
+                        : static_cast<int>(detail::elements_per_transform(
+                              layout, layout.onembed));
+
+  std::lock_guard<std::mutex> guard(detail::fftw_global_mutex());
+  auto p = traits::make_many_c2c(
+      static_cast<int>(layout.n.size()), layout.n.data(),
+      static_cast<int>(layout.howmany),
+      reinterpret_cast<typename traits::complex_type *>(input),
+      layout.inembed.empty() ? nullptr : layout.inembed.data(), layout.istride,
+      idist, reinterpret_cast<typename traits::complex_type *>(output),
+      layout.onembed.empty() ? nullptr : layout.onembed.data(), layout.ostride,
+      odist, direction, flags);
+
+  return external_plan<T>(p);
+}
+
+/**
+ * @brief Creates a batched real-to-complex plan over caller-owned buffers.
+ *
+ * Output is half-complex per transform as governed by the layout's
+ * `onembed`/`odist` (see make_batch_rfft_plan).
+ */
+template <class T>
+inline external_plan<T>
+make_batch_rfft_plan_into(T *input, std::complex<T> *output,
+                          const batch_layout &layout,
+                          unsigned flags = FFTW_ESTIMATE) {
+  using traits = detail::plan_traits<T>;
+  detail::require_valid_layout(layout);
+  const int idist = layout.idist
+                        ? static_cast<int>(layout.idist)
+                        : static_cast<int>(detail::elements_per_transform(
+                              layout, layout.inembed));
+  const int odist = layout.odist
+                        ? static_cast<int>(layout.odist)
+                        : static_cast<int>(detail::elements_per_transform(
+                              layout, layout.onembed));
+
+  std::lock_guard<std::mutex> guard(detail::fftw_global_mutex());
+  auto p = traits::make_many_r2c(
+      static_cast<int>(layout.n.size()), layout.n.data(),
+      static_cast<int>(layout.howmany), input,
+      layout.inembed.empty() ? nullptr : layout.inembed.data(), layout.istride,
+      idist, reinterpret_cast<typename traits::complex_type *>(output),
+      layout.onembed.empty() ? nullptr : layout.onembed.data(), layout.ostride,
+      odist, flags);
+
+  return external_plan<T>(p);
+}
+
+/**
+ * @brief Creates a batched complex-to-real plan over caller-owned buffers.
+ *
+ * Input is half-complex per transform as governed by the layout's
+ * `inembed`/`idist`; output is real (see make_batch_irfft_plan).
+ */
+template <class T>
+inline external_plan<T, T>
+make_batch_irfft_plan_into(std::complex<T> *input, T *output,
+                           const batch_layout &layout,
+                           unsigned flags = FFTW_ESTIMATE) {
+  using traits = detail::plan_traits<T>;
+  detail::require_valid_layout(layout);
+  const int idist = layout.idist
+                        ? static_cast<int>(layout.idist)
+                        : static_cast<int>(detail::elements_per_transform(
+                              layout, layout.inembed));
+  const int odist = layout.odist
+                        ? static_cast<int>(layout.odist)
+                        : static_cast<int>(detail::elements_per_transform(
+                              layout, layout.onembed));
+
+  std::lock_guard<std::mutex> guard(detail::fftw_global_mutex());
+  auto p = traits::make_many_c2r(
+      static_cast<int>(layout.n.size()), layout.n.data(),
+      static_cast<int>(layout.howmany),
+      reinterpret_cast<typename traits::complex_type *>(input),
+      layout.inembed.empty() ? nullptr : layout.inembed.data(), layout.istride,
+      idist, output, layout.onembed.empty() ? nullptr : layout.onembed.data(),
+      layout.ostride, odist, flags);
+
+  return external_plan<T, T>(p);
 }
 
 } // namespace xt::fftw
