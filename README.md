@@ -28,13 +28,23 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
+`XTENSOR_WRAPPERS_USE_OPENMP` (default `ON`) controls batch parallelism:
+when enabled (and OpenMP is available), batched plans split their transforms
+into contiguous chunks — one per OpenMP thread — and execute them with
+`#pragma omp parallel for` over the batch items. This is fully transparent:
+the plan API and results are identical, each transform still runs
+single-threaded (so outputs match the serial order exactly), and no FFTW
+threads variant is ever used. The number of threads is whatever the OpenMP
+runtime is configured with (`OMP_NUM_THREADS`). Passing `-DXTENSOR_WRAPPERS_USE_OPENMP=OFF`
+disables it for a purely serial build.
+
 ## Contents
 
 | Header | Purpose |
 | ------ | ------- |
 | `include/xtensor-wrappers/plan.hpp` | Umbrella header: includes `plan_1d.hpp` and `plan_batch.hpp`. |
 | `include/xtensor-wrappers/plan_1d.hpp` | Plan-based FFTW API for xtensor-fftw: `basic_plan<T>` (owns its output) and `external_plan<T>` (transforms between caller-owned buffers), `make_rfft_plan()`/`make_irfft_plan()`/`make_fft_plan()`, `plan_float`/`plan_double`, plus the plan machinery (`plan_traits`, thread-safe creation). Each factory has two overloads selecting the buffer model: an xtensor input owns its output (`basic_plan`), raw pointers transform between caller buffers (`external_plan`, in-place allowed). Rank-generic — 1D through N-D, 2D included — and move-only RAII in the `xt::fftw` namespace. |
-| `include/xtensor-wrappers/plan_batch.hpp` | `batch_plan<T>`/`make_batch_*_plan()`: howmany identical transforms over strided memory via FFTW's guru (`plan_many`) interface, with per-direction padding/strides (`batch_layout`). The owning overloads return a tight `{howmany}`-prefixed `xt::xarray`; the overload taking an output pointer writes into caller-owned buffers (honouring `onembed`/`ostride`/`odist`). |
+| `include/xtensor-wrappers/plan_batch.hpp` | `batch_plan<T>`/`make_batch_*_plan()`: howmany identical transforms over strided memory via FFTW's guru (`plan_many`) interface, with per-direction padding/strides (`batch_layout`). The owning overloads return a tight `{howmany}`-prefixed `xt::xarray`; the overload taking an output pointer writes into caller-owned buffers (honouring `onembed`/`ostride`/`odist`). Batches are split into contiguous chunks (one per OpenMP thread when built with `XTENSOR_WRAPPERS_USE_OPENMP`) and executed in parallel over the batch items; a rank-2 batch runs its 2D transforms single-threaded, parallelising only across items. |
 
 ## Using the library
 

@@ -42,6 +42,19 @@ target_link_libraries(xtensor-wrappers INTERFACE xtensor-fftw
                                                  PkgConfig::FFTW_DOUBLE)
 target_compile_features(xtensor-wrappers INTERFACE cxx_std_20)
 
+# Parallel batched plans. When enabled, batched plans split their transforms
+# into contiguous chunks and execute them with #pragma omp parallel for over the
+# batch items (completely transparent to the user). When disabled (or when
+# OpenMP is unavailable) batches run single-threaded.
+option(XTENSOR_WRAPPERS_USE_OPENMP "Run batched plans in parallel with OpenMP"
+       ON)
+if(XTENSOR_WRAPPERS_USE_OPENMP)
+  find_package(OpenMP REQUIRED)
+  target_compile_definitions(xtensor-wrappers
+                             INTERFACE XTENSOR_WRAPPERS_USE_OPENMP=1)
+  target_link_libraries(xtensor-wrappers INTERFACE OpenMP::OpenMP_CXX)
+endif()
+
 enable_testing()
 
 # Catch2 test framework (Catch2::Catch2WithMain for the test executables)

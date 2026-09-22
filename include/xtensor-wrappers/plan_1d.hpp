@@ -16,6 +16,15 @@
 #define XTENSOR_FFTW_ASSERT(expr) assert(expr)
 #endif
 
+// Multi-chunk (OpenMP) batch execution; see detail::execute_parallel.
+#ifndef XTENSOR_WRAPPERS_USE_OPENMP
+#define XTENSOR_WRAPPERS_USE_OPENMP 0
+#endif
+
+#if XTENSOR_WRAPPERS_USE_OPENMP
+#include <omp.h>
+#endif
+
 namespace xt::fftw {
 
 namespace detail {
@@ -137,6 +146,24 @@ template <> struct plan_traits<double> {
   static void execute(plan_type p) { fftw_execute(p); }
   static void destroy_plan(plan_type p) { fftw_destroy_plan(p); }
 };
+
+// Execute a list of FFTW plans. Batch plans may split their transforms into
+// contiguous chunks, one FFTW plan per chunk; when built with OpenMP the
+// chunks run in parallel (each transform still executes single-threaded, so
+// the result is identical to the serial order). For a single-chunk plan this
+// degenerates to one plain fftw*_execute() call.
+template <class Handle, class Exec>
+inline void execute_parallel(const Handle *plans, std::size_t n, Exec &&exec) {
+  if (n == 0) {
+    return;
+  }
+#if XTENSOR_WRAPPERS_USE_OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+  for (std::size_t i = 0; i < n; ++i) {
+    exec(plans[i]);
+  }
+}
 
 } // namespace detail
 
@@ -267,7 +294,11 @@ private:
  * end), unlike `basic_plan` which sizes its own output. Passing the same buffer
  * for input and output is allowed (in-place transform).
  *
- * Move-only RAII wrapper around the FFTW handle; planning is guarded by the
+ * A single transform holds one FFTW plan; a batched transform over caller
+ * buffers may hold several (one per contiguous chunk, executed in parallel via
+ * OpenMP when built with it).
+ *
+ * Move-only RAII wrapper around the FFTW handle(s); planning is guarded by the
  * global mutex, `execute()` needs no lock (FFTW >= 3.3.5 execution is
  * thread-safe).
  *
@@ -285,18 +316,14 @@ public:
   external_plan(const external_plan &) = delete;
   external_plan &operator=(const external_plan &) = delete;
 
-  external_plan(external_plan &&other) noexcept : m_plan(other.m_plan) {
-    other.m_plan = nullptr;
-  }
+  external_plan(external_plan &&other) noexcept
+      : m_plans(std::move(other.m_plans)) {}
 
   external_plan &operator=(external_plan &&other) noexcept {
     if (this != &other) {
       std::lock_guard<std::mutex> guard(detail::fftw_global_mutex());
-      if (m_plan) {
-        traits::destroy_plan(m_plan);
-      }
-      m_plan = other.m_plan;
-      other.m_plan = nullptr;
+      destroy();
+      m_plans = std::move(other.m_plans);
     }
     return *this;
   }
@@ -306,36 +333,64 @@ public:
    *
    * @throws std::runtime_error if `p` is null (planner failure).
    */
-  explicit external_plan(plan_type p) : m_plan(p) {
+  explicit external_plan(plan_type p) : m_plans(1, p) {
     if (p == nullptr) {
       throw std::runtime_error("XTENSOR-WRAPPERS: FFTW plan creation failed");
     }
   }
 
-  ~external_plan() {
-    if (m_plan) {
-      std::lock_guard<std::mutex> guard(detail::fftw_global_mutex());
-      traits::destroy_plan(m_plan);
+  /**
+   * @brief Takes ownership of several plans over caller buffers (batch chunks).
+   *
+   * @throws std::runtime_error if any plan is null (planner failure).
+   */
+  explicit external_plan(std::vector<plan_type> plans)
+      : m_plans(std::move(plans)) {
+    for (plan_type p : m_plans) {
+      if (p == nullptr) {
+        throw std::runtime_error("XTENSOR-WRAPPERS: FFTW plan creation failed");
+      }
     }
   }
 
+  ~external_plan() {
+    std::lock_guard<std::mutex> guard(detail::fftw_global_mutex());
+    destroy();
+  }
+
   /**
-   * @brief Executes the transform into the caller-provided output buffer.
+   * @brief Executes the transform(s) into the caller-provided output buffers.
    *
-   * @warning Both buffers passed to the factory must remain valid and must not
+   * @warning The buffers passed to the factory must remain valid and must not
    * be relocated until this plan is destroyed.
    */
   void execute() const {
     XTENSOR_FFTW_ASSERT(
-        m_plan != nullptr &&
+        !m_plans.empty() &&
         "execute() on a default-constructed or moved-from external plan");
-    traits::execute(m_plan);
+    detail::execute_parallel(m_plans.data(), m_plans.size(),
+                             [](plan_type p) { traits::execute(p); });
   }
 
-  plan_type get() const noexcept { return m_plan; }
+  /**
+   * @brief The first plan's handle; for a batched plan this covers only the
+   *        first chunk.
+   */
+  plan_type get() const noexcept {
+    return m_plans.empty() ? nullptr : m_plans.front();
+  }
 
 private:
-  plan_type m_plan = nullptr;
+  void destroy() noexcept {
+    for (plan_type p : m_plans) {
+      if (p) {
+        traits::destroy_plan(p);
+      }
+    }
+    m_plans.clear();
+  }
+
+  std::vector<plan_type> m_plans;
 };
 
 /**

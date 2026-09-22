@@ -2,8 +2,12 @@
 #define XTENSOR_WRAPPERS_PLAN_BATCH_HPP
 
 // Batched transforms over strided memory, built directly on FFTW's guru
-// interface (fftw_plan_many_*). One FFTW plan executes all `howmany`
-// transforms, which lets FFTW vectorize across the batch internally.
+// interface (fftw_plan_many_*).
+//
+// A batch is split into contiguous chunks (by default one per OpenMP thread),
+// each executed by its own plan_many plan via #pragma omp parallel for over
+// the batch items - transparent to the user when XTENSOR_WRAPPERS_USE_OPENMP is
+// enabled. Without OpenMP there is exactly one chunk (plain serial execution).
 //
 // Two factory overloads provide the two buffer models, mirroring the single
 // transform API:
@@ -17,6 +21,7 @@
 // The input side is always strided/padded via batch_layout (inembed/idist/
 // istride), e.g. a 1000-point FFT inside a 1024-element allocation.
 
+#include <algorithm>
 #include <cstddef>
 #include <mutex>
 #include <stdexcept>
@@ -134,6 +139,65 @@ inline void require_tight_output(const batch_layout &l) {
   }
 }
 
+// Number of parallel chunks to split a batch into.
+inline std::size_t batch_thread_count() {
+#if XTENSOR_WRAPPERS_USE_OPENMP
+  return std::max<std::size_t>(1,
+                               static_cast<std::size_t>(omp_get_max_threads()));
+#else
+  return 1;
+#endif
+}
+
+// Split [0, howmany) into `nthreads` contiguous, balanced chunks (non-empty
+// chunks only; empty trailing chunks are dropped).
+inline void chunk_ranges(std::size_t howmany, std::size_t nthreads,
+                         std::vector<std::size_t> &begins,
+                         std::vector<std::size_t> &counts) {
+  begins.clear();
+  counts.clear();
+  const std::size_t per = howmany / nthreads;
+  const std::size_t rem = howmany % nthreads;
+  std::size_t base = 0;
+  for (std::size_t i = 0; i < nthreads; ++i) {
+    const std::size_t c = per + (i < rem ? 1 : 0);
+    if (c > 0) {
+      begins.push_back(base);
+      counts.push_back(c);
+    }
+    base += c;
+  }
+}
+
+// Build one FFTW plan per contiguous chunk of a batch. Chunk boundary `b`
+// starts `b * in_dist` input elements and `b * out_dist` output elements in,
+// so every chunk is an independent, contiguous slice of the same buffers.
+// `plan_one(rank, howmany, in, out)` issues a single chunk plan with the
+// caller's chosen guru routine.
+template <class T, class PlanOne>
+inline std::vector<typename detail::plan_traits<T>::plan_type>
+make_chunked_plans(const batch_layout &l, std::size_t nthreads,
+                   std::size_t in_dist, std::size_t out_dist, char *in,
+                   std::size_t in_elem, char *out, std::size_t out_elem,
+                   PlanOne &&plan_one) {
+  std::vector<std::size_t> begins, counts;
+  chunk_ranges(l.howmany, nthreads, begins, counts);
+  std::vector<typename detail::plan_traits<T>::plan_type> plans;
+  plans.reserve(begins.size());
+  const int rank = static_cast<int>(l.n.size());
+  for (std::size_t i = 0; i < begins.size(); ++i) {
+    auto p = plan_one(rank, static_cast<int>(counts[i]),
+                      in + begins[i] * in_dist * in_elem,
+                      out + begins[i] * out_dist * out_elem);
+    if (p == nullptr) {
+      throw std::runtime_error(
+          "XTENSOR-WRAPPERS: FFTW batch plan creation failed");
+    }
+    plans.push_back(p);
+  }
+  return plans;
+}
+
 } // namespace detail
 
 /**
@@ -146,8 +210,11 @@ inline void require_tight_output(const batch_layout &l) {
  * caller, so it must outlive the plan and must not be reallocated while the
  * plan is alive.
  *
- * Move-only, and FFTW planning is guarded by the global mutex. `execute()`
- * needs no lock (FFTW >= 3.3.5 execution is thread-safe).
+ * The batch is executed as one plan per contiguous chunk; when built with
+ * OpenMP the chunks run in parallel (`execute()` is transparently
+ * multi-threaded over batch items, each transform single-threaded). Move-only,
+ * and FFTW planning is guarded by the global mutex. `execute()` needs no lock
+ * (FFTW >= 3.3.5 execution is thread-safe).
  *
  * @tparam T floating precision (`float` or `double`).
  * @tparam StoredT element type of the owned output array: `std::complex<T>`
@@ -165,44 +232,39 @@ public:
   batch_plan &operator=(const batch_plan &) = delete;
 
   batch_plan(batch_plan &&other) noexcept
-      : m_plan(other.m_plan), m_output(std::move(other.m_output)),
-        m_expected_output_size(other.m_expected_output_size) {
-    other.m_plan = nullptr;
-  }
+      : m_plans(std::move(other.m_plans)), m_output(std::move(other.m_output)),
+        m_expected_output_size(other.m_expected_output_size) {}
 
   batch_plan &operator=(batch_plan &&other) noexcept {
     if (this != &other) {
       std::lock_guard<std::mutex> guard(detail::fftw_global_mutex());
-      if (m_plan) {
-        traits::destroy_plan(m_plan);
-      }
-      m_plan = other.m_plan;
+      destroy();
+      m_plans = std::move(other.m_plans);
       m_output = std::move(other.m_output);
       m_expected_output_size = other.m_expected_output_size;
-      other.m_plan = nullptr;
     }
     return *this;
   }
 
   /**
-   * @brief Takes ownership of a raw batched FFTW plan and its output array.
+   * @brief Takes ownership of raw FFTW plan(s) and the output array.
    *
-   * @throws std::runtime_error if `p` is null (planner failure).
+   * @throws std::runtime_error if any plan is null (planner failure).
    */
-  explicit batch_plan(plan_type p, output_type output)
-      : m_plan(p), m_output(std::move(output)),
+  explicit batch_plan(std::vector<plan_type> plans, output_type output)
+      : m_plans(std::move(plans)), m_output(std::move(output)),
         m_expected_output_size(m_output.size()) {
-    if (p == nullptr) {
-      throw std::runtime_error(
-          "XTENSOR-WRAPPERS: FFTW batch plan creation failed");
+    for (plan_type p : m_plans) {
+      if (p == nullptr) {
+        throw std::runtime_error(
+            "XTENSOR-WRAPPERS: FFTW batch plan creation failed");
+      }
     }
   }
 
   ~batch_plan() {
-    if (m_plan) {
-      std::lock_guard<std::mutex> guard(detail::fftw_global_mutex());
-      traits::destroy_plan(m_plan);
-    }
+    std::lock_guard<std::mutex> guard(detail::fftw_global_mutex());
+    destroy();
   }
 
   /**
@@ -213,14 +275,21 @@ public:
    */
   void execute() const {
     XTENSOR_FFTW_ASSERT(
-        m_plan != nullptr &&
+        !m_plans.empty() &&
         "execute() on a default-constructed or moved-from batch plan");
     XTENSOR_FFTW_ASSERT(m_output.size() == m_expected_output_size &&
                         "output buffer changed since plan creation");
-    traits::execute(m_plan);
+    detail::execute_parallel(m_plans.data(), m_plans.size(),
+                             [](plan_type p) { traits::execute(p); });
   }
 
-  plan_type get() const noexcept { return m_plan; }
+  /**
+   * @brief The first chunk's plan handle (only meaningful for a plan that was
+   *        not split across threads).
+   */
+  plan_type get() const noexcept {
+    return m_plans.empty() ? nullptr : m_plans.front();
+  }
 
   const output_type &output() const noexcept { return m_output; }
 
@@ -230,7 +299,16 @@ public:
   output_type release() { return std::move(m_output); }
 
 private:
-  plan_type m_plan = nullptr;
+  void destroy() noexcept {
+    for (plan_type p : m_plans) {
+      if (p) {
+        traits::destroy_plan(p);
+      }
+    }
+    m_plans.clear();
+  }
+
+  std::vector<plan_type> m_plans;
   output_type m_output;
   std::size_t m_expected_output_size = 0;
 };
@@ -241,6 +319,8 @@ private:
  *
  * @param input borrowed contiguous batch memory (howmany * idist complex
  *        elements).
+ * @throws std::invalid_argument if the output layout is padded/strided
+ *         (onembed/ostride/odist set): owned output is always tight.
  */
 template <class T>
 inline batch_plan<T> make_batch_fft_plan(const std::complex<T> *input,
@@ -248,26 +328,31 @@ inline batch_plan<T> make_batch_fft_plan(const std::complex<T> *input,
                                          int direction = FFTW_FORWARD,
                                          unsigned flags = FFTW_ESTIMATE) {
   using traits = detail::plan_traits<T>;
+  using complex_type = typename traits::complex_type;
   detail::require_valid_layout(layout);
   detail::require_tight_output(layout);
   auto out_shape = detail::output_shape(layout, /*half=*/false);
   const int out_per = static_cast<int>(detail::product(out_shape));
   const int idist = detail::idist_of(layout);
-
+  const int ostride = 1;
   auto output =
       detail::owned_output<std::complex<T>>(out_shape, layout.howmany);
 
   std::lock_guard<std::mutex> guard(detail::fftw_global_mutex());
-  auto p = traits::make_many_c2c(
-      static_cast<int>(layout.n.size()), layout.n.data(),
-      static_cast<int>(layout.howmany),
-      reinterpret_cast<typename traits::complex_type *>(
-          const_cast<std::complex<T> *>(input)),
-      layout.inembed.empty() ? nullptr : layout.inembed.data(), layout.istride,
-      idist, reinterpret_cast<typename traits::complex_type *>(output.data()),
-      out_shape.data(), 1, out_per, direction, flags);
+  auto plans = detail::make_chunked_plans<T>(
+      layout, detail::batch_thread_count(), idist, out_per,
+      reinterpret_cast<char *>(const_cast<std::complex<T> *>(input)),
+      sizeof(std::complex<T>), reinterpret_cast<char *>(output.data()),
+      sizeof(std::complex<T>), [&](int rank, int howmany, char *ci, char *co) {
+        return traits::make_many_c2c(
+            rank, layout.n.data(), howmany,
+            reinterpret_cast<complex_type *>(ci),
+            layout.inembed.empty() ? nullptr : layout.inembed.data(),
+            layout.istride, idist, reinterpret_cast<complex_type *>(co),
+            out_shape.data(), ostride, out_per, direction, flags);
+      });
 
-  return batch_plan<T>(p, std::move(output));
+  return batch_plan<T>(std::move(plans), std::move(output));
 }
 
 /**
@@ -284,50 +369,67 @@ make_batch_fft_plan(std::complex<T> *input, std::complex<T> *output,
                     const batch_layout &layout, int direction = FFTW_FORWARD,
                     unsigned flags = FFTW_ESTIMATE) {
   using traits = detail::plan_traits<T>;
+  using complex_type = typename traits::complex_type;
   detail::require_valid_layout(layout);
   const int idist = detail::idist_of(layout);
   const int odist = detail::odist_of(layout);
+  const int ostride = layout.ostride;
 
   std::lock_guard<std::mutex> guard(detail::fftw_global_mutex());
-  auto p = traits::make_many_c2c(
-      static_cast<int>(layout.n.size()), layout.n.data(),
-      static_cast<int>(layout.howmany),
-      reinterpret_cast<typename traits::complex_type *>(input),
-      layout.inembed.empty() ? nullptr : layout.inembed.data(), layout.istride,
-      idist, reinterpret_cast<typename traits::complex_type *>(output),
-      layout.onembed.empty() ? nullptr : layout.onembed.data(), layout.ostride,
-      odist, direction, flags);
+  auto plans = detail::make_chunked_plans<T>(
+      layout, detail::batch_thread_count(), idist, odist,
+      reinterpret_cast<char *>(input), sizeof(std::complex<T>),
+      reinterpret_cast<char *>(output), sizeof(std::complex<T>),
+      [&](int rank, int howmany, char *ci, char *co) {
+        return traits::make_many_c2c(
+            rank, layout.n.data(), howmany,
+            reinterpret_cast<complex_type *>(ci),
+            layout.inembed.empty() ? nullptr : layout.inembed.data(),
+            layout.istride, idist, reinterpret_cast<complex_type *>(co),
+            layout.onembed.empty() ? nullptr : layout.onembed.data(), ostride,
+            odist, direction, flags);
+      });
 
-  return external_plan<T>(p);
+  return external_plan<T>(std::move(plans));
 }
 
 /**
  * @brief Creates a plan for a batch of real-to-complex (half-complex) FFTs;
  *        owns the output as a tight `{howmany, ..., n/2+1}` xarray.
+ *
+ * @throws std::invalid_argument if the output layout is padded/strided
+ *         (onembed/ostride/odist set): owned output is always tight.
  */
 template <class T>
 inline batch_plan<T> make_batch_rfft_plan(const T *input,
                                           const batch_layout &layout,
                                           unsigned flags = FFTW_ESTIMATE) {
   using traits = detail::plan_traits<T>;
+  using real_type = typename traits::real_type;
+  using complex_type = typename traits::complex_type;
   detail::require_valid_layout(layout);
   detail::require_tight_output(layout);
   auto out_shape = detail::output_shape(layout, /*half=*/true);
   const int out_per = static_cast<int>(detail::product(out_shape));
   const int idist = detail::idist_of(layout);
-
+  const int ostride = 1;
   auto output =
       detail::owned_output<std::complex<T>>(out_shape, layout.howmany);
 
   std::lock_guard<std::mutex> guard(detail::fftw_global_mutex());
-  auto p = traits::make_many_r2c(
-      static_cast<int>(layout.n.size()), layout.n.data(),
-      static_cast<int>(layout.howmany), const_cast<T *>(input),
-      layout.inembed.empty() ? nullptr : layout.inembed.data(), layout.istride,
-      idist, reinterpret_cast<typename traits::complex_type *>(output.data()),
-      out_shape.data(), 1, out_per, flags);
+  auto plans = detail::make_chunked_plans<T>(
+      layout, detail::batch_thread_count(), idist, out_per,
+      reinterpret_cast<char *>(const_cast<T *>(input)), sizeof(T),
+      reinterpret_cast<char *>(output.data()), sizeof(std::complex<T>),
+      [&](int rank, int howmany, char *ci, char *co) {
+        return traits::make_many_r2c(
+            rank, layout.n.data(), howmany, reinterpret_cast<real_type *>(ci),
+            layout.inembed.empty() ? nullptr : layout.inembed.data(),
+            layout.istride, idist, reinterpret_cast<complex_type *>(co),
+            out_shape.data(), ostride, out_per, flags);
+      });
 
-  return batch_plan<T>(p, std::move(output));
+  return batch_plan<T>(std::move(plans), std::move(output));
 }
 
 /**
@@ -342,20 +444,28 @@ inline external_plan<T> make_batch_rfft_plan(T *input, std::complex<T> *output,
                                              const batch_layout &layout,
                                              unsigned flags = FFTW_ESTIMATE) {
   using traits = detail::plan_traits<T>;
+  using real_type = typename traits::real_type;
+  using complex_type = typename traits::complex_type;
   detail::require_valid_layout(layout);
   const int idist = detail::idist_of(layout);
   const int odist = detail::odist_of(layout);
+  const int ostride = layout.ostride;
 
   std::lock_guard<std::mutex> guard(detail::fftw_global_mutex());
-  auto p = traits::make_many_r2c(
-      static_cast<int>(layout.n.size()), layout.n.data(),
-      static_cast<int>(layout.howmany), input,
-      layout.inembed.empty() ? nullptr : layout.inembed.data(), layout.istride,
-      idist, reinterpret_cast<typename traits::complex_type *>(output),
-      layout.onembed.empty() ? nullptr : layout.onembed.data(), layout.ostride,
-      odist, flags);
+  auto plans = detail::make_chunked_plans<T>(
+      layout, detail::batch_thread_count(), idist, odist,
+      reinterpret_cast<char *>(input), sizeof(T),
+      reinterpret_cast<char *>(output), sizeof(std::complex<T>),
+      [&](int rank, int howmany, char *ci, char *co) {
+        return traits::make_many_r2c(
+            rank, layout.n.data(), howmany, reinterpret_cast<real_type *>(ci),
+            layout.inembed.empty() ? nullptr : layout.inembed.data(),
+            layout.istride, idist, reinterpret_cast<complex_type *>(co),
+            layout.onembed.empty() ? nullptr : layout.onembed.data(), ostride,
+            odist, flags);
+      });
 
-  return external_plan<T>(p);
+  return external_plan<T>(std::move(plans));
 }
 
 /**
@@ -364,30 +474,40 @@ inline external_plan<T> make_batch_rfft_plan(T *input, std::complex<T> *output,
  *
  * The input is half-complex per transform (e.g. tight `n / 2 + 1` elements, or
  * padded via `inembed`/`idist`); `layout.n` is the real output size.
+ *
+ * @throws std::invalid_argument if the output layout is padded/strided
+ *         (onembed/ostride/odist set): owned output is always tight.
  */
 template <class T>
 inline batch_plan<T, T> make_batch_irfft_plan(const std::complex<T> *input,
                                               const batch_layout &layout,
                                               unsigned flags = FFTW_ESTIMATE) {
   using traits = detail::plan_traits<T>;
+  using real_type = typename traits::real_type;
+  using complex_type = typename traits::complex_type;
   detail::require_valid_layout(layout);
   detail::require_tight_output(layout);
   auto out_shape = detail::output_shape(layout, /*half=*/false);
   const int out_per = static_cast<int>(detail::product(out_shape));
   const int idist = detail::idist_of(layout);
-
+  const int ostride = 1;
   auto output = detail::owned_output<T>(out_shape, layout.howmany);
 
   std::lock_guard<std::mutex> guard(detail::fftw_global_mutex());
-  auto p = traits::make_many_c2r(
-      static_cast<int>(layout.n.size()), layout.n.data(),
-      static_cast<int>(layout.howmany),
-      reinterpret_cast<typename traits::complex_type *>(
-          const_cast<std::complex<T> *>(input)),
-      layout.inembed.empty() ? nullptr : layout.inembed.data(), layout.istride,
-      idist, output.data(), out_shape.data(), 1, out_per, flags);
+  auto plans = detail::make_chunked_plans<T>(
+      layout, detail::batch_thread_count(), idist, out_per,
+      reinterpret_cast<char *>(const_cast<std::complex<T> *>(input)),
+      sizeof(std::complex<T>), reinterpret_cast<char *>(output.data()),
+      sizeof(T), [&](int rank, int howmany, char *ci, char *co) {
+        return traits::make_many_c2r(
+            rank, layout.n.data(), howmany,
+            reinterpret_cast<complex_type *>(ci),
+            layout.inembed.empty() ? nullptr : layout.inembed.data(),
+            layout.istride, idist, reinterpret_cast<real_type *>(co),
+            out_shape.data(), ostride, out_per, flags);
+      });
 
-  return batch_plan<T, T>(p, std::move(output));
+  return batch_plan<T, T>(std::move(plans), std::move(output));
 }
 
 /**
@@ -403,20 +523,29 @@ make_batch_irfft_plan(std::complex<T> *input, T *output,
                       const batch_layout &layout,
                       unsigned flags = FFTW_ESTIMATE) {
   using traits = detail::plan_traits<T>;
+  using real_type = typename traits::real_type;
+  using complex_type = typename traits::complex_type;
   detail::require_valid_layout(layout);
   const int idist = detail::idist_of(layout);
   const int odist = detail::odist_of(layout);
+  const int ostride = layout.ostride;
 
   std::lock_guard<std::mutex> guard(detail::fftw_global_mutex());
-  auto p = traits::make_many_c2r(
-      static_cast<int>(layout.n.size()), layout.n.data(),
-      static_cast<int>(layout.howmany),
-      reinterpret_cast<typename traits::complex_type *>(input),
-      layout.inembed.empty() ? nullptr : layout.inembed.data(), layout.istride,
-      idist, output, layout.onembed.empty() ? nullptr : layout.onembed.data(),
-      layout.ostride, odist, flags);
+  auto plans = detail::make_chunked_plans<T>(
+      layout, detail::batch_thread_count(), idist, odist,
+      reinterpret_cast<char *>(input), sizeof(std::complex<T>),
+      reinterpret_cast<char *>(output), sizeof(T),
+      [&](int rank, int howmany, char *ci, char *co) {
+        return traits::make_many_c2r(
+            rank, layout.n.data(), howmany,
+            reinterpret_cast<complex_type *>(ci),
+            layout.inembed.empty() ? nullptr : layout.inembed.data(),
+            layout.istride, idist, reinterpret_cast<real_type *>(co),
+            layout.onembed.empty() ? nullptr : layout.onembed.data(), ostride,
+            odist, flags);
+      });
 
-  return external_plan<T, T>(p);
+  return external_plan<T, T>(std::move(plans));
 }
 
 } // namespace xt::fftw
