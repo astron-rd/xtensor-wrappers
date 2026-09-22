@@ -1,6 +1,6 @@
-// Shared helpers for the xtensor-wrappers tests: a CHECK macro that works in
-// Release builds, approximate-equality comparisons, deterministic random data
-// generation, and raw FFTW reference transforms used as ground truth.
+// Shared helpers for the xtensor-wrappers tests: approximate-equality
+// comparisons, deterministic random data generation, and raw FFTW reference
+// transforms used as ground truth.
 
 #ifndef TEST_HELPERS_HPP
 #define TEST_HELPERS_HPP
@@ -16,16 +16,6 @@
 #include <xtensor/containers/xarray.hpp>
 
 #include <xtensor-wrappers/plan.hpp>
-
-static int g_failures = 0;
-
-#define CHECK(cond)                                                          \
-  do {                                                                       \
-    if (!(cond)) {                                                           \
-      std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);            \
-      ++g_failures;                                                          \
-    }                                                                        \
-  } while (0)
 
 template <class T> constexpr T tolerance();
 
@@ -156,19 +146,10 @@ static xt::xarray<T> ref_c2r(const xt::xarray<std::complex<T>> &input,
       static_cast<int>(n.size()), n.data(),
       reinterpret_cast<typename traits::complex_type *>(
           const_cast<std::complex<T> *>(input.data())),
-      out.data(), FFTW_ESTIMATE);
+    out.data(), FFTW_ESTIMATE);
   traits::execute(p);
   traits::destroy_plan(p);
   return out;
-}
-
-static int report_and_exit(const char *what) {
-  if (g_failures == 0) {
-    std::printf("PASS: %s\n", what);
-    return 0;
-  }
-  std::printf("FAIL: %s: %d check(s) failed\n", what, g_failures);
-  return 1;
 }
 
 #endif // TEST_HELPERS_HPP

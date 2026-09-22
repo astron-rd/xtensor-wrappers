@@ -22,6 +22,8 @@ find_package(PkgConfig REQUIRED)
 pkg_search_module(FFTW REQUIRED fftw3f IMPORTED_TARGET)
 pkg_search_module(FFTW_DOUBLE REQUIRED fftw3 IMPORTED_TARGET)
 
+include(FetchContent)
+
 # Fetch the xtensor stack (xtl, xtensor, xtensor-fftw)
 set(XTENSOR_LIBRARIES xtensor xtensor-fftw)
 include("${CMAKE_SOURCE_DIR}/cmake/FetchXTensor.cmake")
@@ -37,4 +39,15 @@ target_link_libraries(xtensor-wrappers INTERFACE xtensor-fftw PkgConfig::FFTW_DO
 target_compile_features(xtensor-wrappers INTERFACE cxx_std_20)
 
 enable_testing()
+
+# Catch2 test framework (for catch_discover_tests)
+FetchContent_Declare(
+  Catch2
+  GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+  GIT_TAG v3.16.0
+  GIT_SHALLOW TRUE)
+FetchContent_MakeAvailable(Catch2)
+list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
+include(Catch)
+
 add_subdirectory(test)

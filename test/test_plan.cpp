@@ -1,7 +1,7 @@
 // 1D correctness of the xtensor-fftw plan wrapper (float and double),
 // checked against a raw FFTW reference plus an analytic reconstruction.
 
-#include <vector>
+#include <catch2/catch_test_macros.hpp>
 
 #include <xtensor/containers/xarray.hpp>
 
@@ -10,12 +10,12 @@
 #include "test_helpers.hpp"
 
 template <class T>
-static void test_1d_r2c(const std::size_t n) {
+static void check_1d_r2c(const std::size_t n) {
   auto in = random_real<T>({n});
   auto ref = ref_r2c(in);
 
   auto plan = xt::fftw::make_rfft_plan(in, xt::xarray<std::complex<T>>{});
-  CHECK(plan.output().shape() == ref.shape());
+  REQUIRE(plan.output().shape() == ref.shape());
   plan.execute();
   CHECK(allclose(plan.output(), ref));
 
@@ -28,7 +28,7 @@ static void test_1d_r2c(const std::size_t n) {
 }
 
 template <class T>
-static void test_1d_c2c(const std::size_t n) {
+static void check_1d_c2c(const std::size_t n) {
   auto in = random_complex<T>({n});
   auto ref = ref_c2c<T>(in);
 
@@ -39,7 +39,7 @@ static void test_1d_c2c(const std::size_t n) {
 }
 
 template <class T>
-static void test_1d_irfft(const std::size_t n) {
+static void check_1d_irfft(const std::size_t n) {
   const bool odd = (n % 2 == 1);
   auto in = random_real<T>({n});
   auto spec = ref_r2c(in); // half-complex spectrum (n/2+1 entries)
@@ -47,7 +47,7 @@ static void test_1d_irfft(const std::size_t n) {
 
   auto plan =
       xt::fftw::make_irfft_plan(spec, xt::xarray<T>{}, odd, FFTW_ESTIMATE);
-  CHECK(plan.output().shape() == std::vector<std::size_t>{n});
+  REQUIRE(plan.output().shape() == std::vector<std::size_t>{n});
   plan.execute();
   CHECK(allclose(plan.output(), ref));
 
@@ -57,13 +57,18 @@ static void test_1d_irfft(const std::size_t n) {
   }
 }
 
-int main() {
-  test_1d_r2c<float>(16);
-  test_1d_r2c<double>(100);
-  test_1d_c2c<float>(128);
-  test_1d_c2c<double>(63);
-  test_1d_irfft<float>(8);     // even inverse size
-  test_1d_irfft<float>(9);     // odd inverse size
-  test_1d_irfft<double>(127);  // odd inverse size
-  return report_and_exit("plan 1D (r2c/c2c/irfft, float and double)");
+TEST_CASE("1D r2c matches the FFTW reference") {
+  check_1d_r2c<float>(16);
+  check_1d_r2c<double>(100);
+}
+
+TEST_CASE("1D c2c matches the FFTW reference") {
+  check_1d_c2c<float>(128);
+  check_1d_c2c<double>(63);
+}
+
+TEST_CASE("1D irfft reconstructs the real signal") {
+  check_1d_irfft<float>(8);     // even inverse size
+  check_1d_irfft<float>(9);     // odd inverse size
+  check_1d_irfft<double>(127);  // odd inverse size
 }
