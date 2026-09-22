@@ -12,11 +12,8 @@
 
 #include <xtensor-wrappers/plan.hpp>
 
-namespace xt {
-namespace fftw {
-
+namespace xt::fftw {
 namespace detail {
-
 // In-place 1D complex-to-complex DFT, pinned to a fixed contiguous buffer.
 //
 // Unlike xt::fftw::basic_plan this binds a raw pointer instead of owning an
@@ -85,7 +82,6 @@ private:
 };
 
 } // namespace detail
-
 /**
  * @brief Reusable 2D complex-to-complex FFT that decomposes the transform into
  *        1D FFTs over rows followed by 1D FFTs over columns.
@@ -222,7 +218,5 @@ inline xt::xarray<std::complex<T>> fft2(xt::xarray<std::complex<T>> &input,
   return p.release();
 }
 
-} // namespace fftw
-} // namespace xt
-
+} // namespace xt::fftw
 #endif // XTENSOR_WRAPPERS_FFT2_HPP
