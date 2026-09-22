@@ -355,9 +355,9 @@ TEST_CASE("owning batch plan rejects a padded output layout") {
 
   std::vector<std::complex<T>> in(k * n);
   REQUIRE_THROWS_AS(make_batch_fft_plan(in.data(), l), std::invalid_argument);
-  REQUIRE_THROWS_AS(make_batch_fft_plan(in.data(), l, FFTW_FORWARD,
-                                        FFTW_ESTIMATE),
-                    std::invalid_argument);
+  REQUIRE_THROWS_AS(
+      make_batch_fft_plan(in.data(), l, FFTW_FORWARD, FFTW_ESTIMATE),
+      std::invalid_argument);
 }
 
 // The batch factories derive rank from layout.n, so rank-2 (batched 2D) needs
