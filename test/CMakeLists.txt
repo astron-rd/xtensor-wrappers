@@ -3,9 +3,8 @@
 list(
   APPEND
   TESTS
-  test_plan
-  test_fft2
-  test_fft2_rows_cols)
+  test_1d
+  test_2d)
 
 foreach(test ${TESTS})
   add_executable(${test} ${test}.cpp)
