@@ -1,0 +1,44 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Default build: batched plans run in parallel via OpenMP.
+          - name: openmp
+            openmp: ON
+          # Serial path: OpenMP disabled, batches run single-threaded.
+          - name: serial
+            openmp: OFF
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ libfftw3-dev
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          -DXTENSOR_WRAPPERS_USE_OPENMP=${{ matrix.openmp }}
+
+      - name: Build
+        run: cmake --build build -j "$(nproc)"
+
+      - name: Test
+        env:
+          # The test binaries do not depend on a user session, but setting a
+          # valid runtime dir avoids any /run/user/<uid> introspection hiccups
+          # on fresh CI images.
+          XDG_RUNTIME_DIR: /tmp/xtw-runtime
+        run: |
+          mkdir -p "$XDG_RUNTIME_DIR"
+          ctest --test-dir build --output-on-failure

@@ -33,8 +33,8 @@ pkg_search_module(XTW_FFTW_DOUBLE REQUIRED fftw3 IMPORTED_TARGET)
 include(FetchContent)
 
 if(NOT TARGET xtensor-fftw)
-  # Standalone build: fetch the stack and give xtensor-fftw its
-  # single-precision FFTW. FetchXTensor.cmake links against PkgConfig::FFTW.
+  # Standalone build: fetch the stack and give xtensor-fftw its single-precision
+  # FFTW. FetchXTensor.cmake links against PkgConfig::FFTW.
   pkg_search_module(FFTW REQUIRED fftw3f IMPORTED_TARGET)
   set(XTENSOR_LIBRARIES xtensor xtensor-fftw)
   include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/FetchXTensor.cmake")
@@ -48,8 +48,8 @@ add_library(xtensor-wrappers INTERFACE)
 # CMAKE_CURRENT_SOURCE_DIR, not CMAKE_SOURCE_DIR: the latter is the parent
 # project's source dir when this library is consumed as a subproject.
 target_include_directories(
-  xtensor-wrappers INTERFACE
-  "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>")
+  xtensor-wrappers
+  INTERFACE "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>")
 # xtensor is linked explicitly (not just via xtensor-fftw): the public API is
 # built on xt::xarray, and a consumer's xtensor-fftw target may not carry the
 # xtensor include path transitively.
@@ -58,21 +58,23 @@ target_link_libraries(xtensor-wrappers INTERFACE xtensor xtensor-fftw
 target_compile_features(xtensor-wrappers INTERFACE cxx_std_20)
 
 # Parallel batched plans. When enabled, batched plans split their transforms
-# into contiguous chunks and execute them with #pragma omp parallel for over
-# the batch items (completely transparent to the user). When disabled (or when
+# into contiguous chunks and execute them with #pragma omp parallel for over the
+# batch items (completely transparent to the user). When disabled (or when
 # OpenMP is unavailable) batches run single-threaded.
-option(XTENSOR_WRAPPERS_USE_OPENMP "Run batched plans in parallel with OpenMP" ON)
+option(XTENSOR_WRAPPERS_USE_OPENMP "Run batched plans in parallel with OpenMP"
+       ON)
 if(XTENSOR_WRAPPERS_USE_OPENMP)
   find_package(OpenMP REQUIRED)
-  target_compile_definitions(xtensor-wrappers INTERFACE XTENSOR_WRAPPERS_USE_OPENMP=1)
+  target_compile_definitions(xtensor-wrappers
+                             INTERFACE XTENSOR_WRAPPERS_USE_OPENMP=1)
   target_link_libraries(xtensor-wrappers INTERFACE OpenMP::OpenMP_CXX)
 endif()
 
 # Unit tests. Only the top-level project builds them (and only then does the
 # Catch2 dependency get fetched); a consumer that pulls this library in as a
 # subproject gets the library target and none of the test machinery. The option
-# is namespaced (not the generic BUILD_TESTING) so it cannot clash with a
-# parent project's testing option.
+# is namespaced (not the generic BUILD_TESTING) so it cannot clash with a parent
+# project's testing option.
 set(XTENSOR_WRAPPERS_BUILD_TESTING_DEFAULT OFF)
 if(PROJECT_IS_TOP_LEVEL)
   set(XTENSOR_WRAPPERS_BUILD_TESTING_DEFAULT ON)
