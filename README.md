@@ -30,21 +30,25 @@ ctest --test-dir build --output-on-failure
 
 `XTENSOR_WRAPPERS_USE_OPENMP` (default `ON`) controls batch parallelism:
 when enabled (and OpenMP is available), batched plans split their transforms
-into contiguous chunks — one per OpenMP thread — and execute them with
-`#pragma omp parallel for` over the batch items. This is fully transparent:
-the plan API and results are identical, each transform still runs
-single-threaded (so outputs match the serial order exactly), and no FFTW
-threads variant is ever used. The number of threads is whatever the OpenMP
-runtime is configured with (`OMP_NUM_THREADS`). Passing `-DXTENSOR_WRAPPERS_USE_OPENMP=OFF`
-disables it for a purely serial build.
+into contiguous chunks and execute them with `#pragma omp parallel for` over
+the batch items. This is fully transparent: the plan API and results are
+identical, each transform still runs single-threaded (so outputs match the
+serial order exactly), and no FFTW threads variant is ever used. Chunks are
+sized so a batch is never split below ~64 transforms per chunk (a handful of
+tiny FFTW calls per chunk cannot exploit SIMD), and the parallel region is
+bounded by the number of chunks, so over-provisioned thread counts do not
+idle-spin. The number of threads is whatever the OpenMP runtime is configured
+with (`OMP_NUM_THREADS`). Passing `-DXTENSOR_WRAPPERS_USE_OPENMP=OFF` disables
+it for a purely serial build.
 
 ## Contents
 
 | Header | Purpose |
 | ------ | ------- |
-| `include/xtensor-wrappers/plan.hpp` | Umbrella header: includes `plan_1d.hpp` and `plan_batch.hpp`. |
+| `include/xtensor-wrappers/plan.hpp` | Umbrella header: includes `plan_1d.hpp`, `plan_batch.hpp` and `plan_2d.hpp`. |
 | `include/xtensor-wrappers/plan_1d.hpp` | Plan-based FFTW API for xtensor-fftw: `basic_plan<T>` (owns its output) and `external_plan<T>` (transforms between caller-owned buffers), `make_rfft_plan()`/`make_irfft_plan()`/`make_fft_plan()`, `plan_float`/`plan_double`, plus the plan machinery (`plan_traits`, thread-safe creation). Each factory has two overloads selecting the buffer model: an xtensor input owns its output (`basic_plan`), raw pointers transform between caller buffers (`external_plan`, in-place allowed). Rank-generic — 1D through N-D, 2D included — and move-only RAII in the `xt::fftw` namespace. |
-| `include/xtensor-wrappers/plan_batch.hpp` | `batch_plan<T>`/`make_batch_*_plan()`: howmany identical transforms over strided memory via FFTW's guru (`plan_many`) interface, with per-direction padding/strides (`batch_layout`). The owning overloads return a tight `{howmany}`-prefixed `xt::xarray`; the overload taking an output pointer writes into caller-owned buffers (honouring `onembed`/`ostride`/`odist`). Batches are split into contiguous chunks (one per OpenMP thread when built with `XTENSOR_WRAPPERS_USE_OPENMP`) and executed in parallel over the batch items; a rank-2 batch runs its 2D transforms single-threaded, parallelising only across items. |
+| `include/xtensor-wrappers/plan_batch.hpp` | `batch_plan<T>`/`make_batch_*_plan()`: howmany identical transforms over strided memory via FFTW's guru (`plan_many`) interface, with per-direction padding/strides (`batch_layout`). The owning overloads return a tight `{howmany}`-prefixed `xt::xarray`; the overload taking an output pointer writes into caller-owned buffers (honouring `onembed`/`ostride`/`odist`). Batches are split into contiguous chunks and executed in parallel over the batch items when built with `XTENSOR_WRAPPERS_USE_OPENMP`; a rank-2 batch runs its 2D transforms single-threaded, parallelising only across items. |
+| `include/xtensor-wrappers/plan_2d.hpp` | `plan_fft2<T>`/`external_fft2_plan<T>`/`make_fft2_plan()`: a *parallel 2-D* complex transform for the few/large-grid workload (e.g. one 1024² grid FFT per polarization) that a plain rank-N plan cannot parallelize. Exploits separability: a batched row pass (`n={cols}`, `howmany=rows·planes`) followed by a strided column pass (`istride=cols`, `idist=1`, `ostride=cols`, `odist=1`), both through the chunk-parallel batch machinery, so a single transform uses the whole machine. No intermediate transpose, and the output is in the native orientation (`output().shape() == input.shape()`). Takes rank-2 (`{rows, cols}`) or rank-3 (`{planes, rows, cols}`) inputs; both buffer models; unnormalized; honours `direction`/`flags`. |
 
 ## Using the library
 
@@ -72,6 +76,12 @@ layout.inembed = {1024};
 layout.idist = 1024;
 auto bp = xt::fftw::make_batch_fft_plan(in_data, layout);
 bp.execute(); // bp.output() has shape {k, 1000}
+
+// Parallel 2-D transform: a grid (or one 2-D FFT per plane of a rank-3 array)
+// that is too big for the batch API's per-item parallelism.
+xt::xarray<std::complex<float>> grid = ...; // {1024, 1024}
+auto gp = xt::fftw::make_fft2_plan(grid);
+gp.execute(); // gp.output() is the 2-D FFT, native orientation
 ```
 
 Consumers link the target and get the whole dependency tree:

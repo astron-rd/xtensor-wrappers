@@ -170,6 +170,23 @@ inline std::size_t batch_thread_count() {
 #endif
 }
 
+// Minimum transforms per chunk: below this a chunk degrades into a handful of
+// tiny FFTW calls that cannot exploit SIMD, so splitting further only adds
+// overhead.
+inline constexpr std::size_t min_transforms_per_chunk = 64;
+
+// Number of parallel chunks a batch of `howmany` transforms should be split
+// into: at most one per OpenMP thread, and never so many that a chunk falls
+// below min_transforms_per_chunk transforms.
+inline std::size_t batch_chunk_count(std::size_t howmany,
+                                     std::size_t max_chunks = 0) {
+  const std::size_t cap =
+      max_chunks ? max_chunks : static_cast<std::size_t>(batch_thread_count());
+  const std::size_t by_min =
+      (howmany + min_transforms_per_chunk - 1) / min_transforms_per_chunk;
+  return std::max<std::size_t>(1, std::min(cap, by_min));
+}
+
 // Split [0, howmany) into `nthreads` contiguous, balanced chunks (non-empty
 // chunks only; empty trailing chunks are dropped).
 inline void chunk_ranges(std::size_t howmany, std::size_t nthreads,
@@ -193,16 +210,17 @@ inline void chunk_ranges(std::size_t howmany, std::size_t nthreads,
 // Build one FFTW plan per contiguous chunk of a batch. Chunk boundary `b`
 // starts `b * in_dist` input elements and `b * out_dist` output elements in,
 // so every chunk is an independent, contiguous slice of the same buffers.
+// The batch is split into batch_chunk_count(howmany) balanced chunks (capped
+// so each chunk keeps at least min_transforms_per_chunk transforms).
 // `plan_one(rank, howmany, in, out)` issues a single chunk plan with the
 // caller's chosen guru routine.
 template <class T, class PlanOne>
 inline std::vector<typename detail::plan_traits<T>::plan_type>
-make_chunked_plans(const batch_layout &l, std::size_t nthreads,
-                   std::size_t in_dist, std::size_t out_dist, char *in,
-                   std::size_t in_elem, char *out, std::size_t out_elem,
-                   PlanOne &&plan_one) {
+make_chunked_plans(const batch_layout &l, std::size_t in_dist,
+                   std::size_t out_dist, char *in, std::size_t in_elem,
+                   char *out, std::size_t out_elem, PlanOne &&plan_one) {
   std::vector<std::size_t> begins, counts;
-  chunk_ranges(l.howmany, nthreads, begins, counts);
+  chunk_ranges(l.howmany, batch_chunk_count(l.howmany), begins, counts);
   std::vector<typename detail::plan_traits<T>::plan_type> plans;
   plans.reserve(begins.size());
   const int rank = static_cast<int>(l.n.size());
@@ -361,7 +379,7 @@ inline batch_plan<T> make_batch_fft_plan(const std::complex<T> *input,
 
   std::lock_guard<std::mutex> guard(detail::fftw_global_mutex());
   auto plans = detail::make_chunked_plans<T>(
-      layout, detail::batch_thread_count(), idist, out_per,
+      layout, idist, out_per,
       reinterpret_cast<char *>(const_cast<std::complex<T> *>(input)),
       sizeof(std::complex<T>), reinterpret_cast<char *>(output.data()),
       sizeof(std::complex<T>), [&](int rank, int howmany, char *ci, char *co) {
@@ -398,10 +416,9 @@ make_batch_fft_plan(std::complex<T> *input, std::complex<T> *output,
 
   std::lock_guard<std::mutex> guard(detail::fftw_global_mutex());
   auto plans = detail::make_chunked_plans<T>(
-      layout, detail::batch_thread_count(), idist, odist,
-      reinterpret_cast<char *>(input), sizeof(std::complex<T>),
-      reinterpret_cast<char *>(output), sizeof(std::complex<T>),
-      [&](int rank, int howmany, char *ci, char *co) {
+      layout, idist, odist, reinterpret_cast<char *>(input),
+      sizeof(std::complex<T>), reinterpret_cast<char *>(output),
+      sizeof(std::complex<T>), [&](int rank, int howmany, char *ci, char *co) {
         return traits::make_many_c2c(
             rank, layout.n.data(), howmany,
             reinterpret_cast<complex_type *>(ci),
@@ -439,10 +456,9 @@ inline batch_plan<T> make_batch_rfft_plan(const T *input,
 
   std::lock_guard<std::mutex> guard(detail::fftw_global_mutex());
   auto plans = detail::make_chunked_plans<T>(
-      layout, detail::batch_thread_count(), idist, out_per,
-      reinterpret_cast<char *>(const_cast<T *>(input)), sizeof(T),
-      reinterpret_cast<char *>(output.data()), sizeof(std::complex<T>),
-      [&](int rank, int howmany, char *ci, char *co) {
+      layout, idist, out_per, reinterpret_cast<char *>(const_cast<T *>(input)),
+      sizeof(T), reinterpret_cast<char *>(output.data()),
+      sizeof(std::complex<T>), [&](int rank, int howmany, char *ci, char *co) {
         return traits::make_many_r2c(
             rank, layout.n.data(), howmany, reinterpret_cast<real_type *>(ci),
             layout.inembed.empty() ? nullptr : layout.inembed.data(),
@@ -474,8 +490,7 @@ inline external_plan<T> make_batch_rfft_plan(T *input, std::complex<T> *output,
 
   std::lock_guard<std::mutex> guard(detail::fftw_global_mutex());
   auto plans = detail::make_chunked_plans<T>(
-      layout, detail::batch_thread_count(), idist, odist,
-      reinterpret_cast<char *>(input), sizeof(T),
+      layout, idist, odist, reinterpret_cast<char *>(input), sizeof(T),
       reinterpret_cast<char *>(output), sizeof(std::complex<T>),
       [&](int rank, int howmany, char *ci, char *co) {
         return traits::make_many_r2c(
@@ -516,7 +531,7 @@ inline batch_plan<T, T> make_batch_irfft_plan(const std::complex<T> *input,
 
   std::lock_guard<std::mutex> guard(detail::fftw_global_mutex());
   auto plans = detail::make_chunked_plans<T>(
-      layout, detail::batch_thread_count(), idist, out_per,
+      layout, idist, out_per,
       reinterpret_cast<char *>(const_cast<std::complex<T> *>(input)),
       sizeof(std::complex<T>), reinterpret_cast<char *>(output.data()),
       sizeof(T), [&](int rank, int howmany, char *ci, char *co) {
@@ -553,9 +568,8 @@ make_batch_irfft_plan(std::complex<T> *input, T *output,
 
   std::lock_guard<std::mutex> guard(detail::fftw_global_mutex());
   auto plans = detail::make_chunked_plans<T>(
-      layout, detail::batch_thread_count(), idist, odist,
-      reinterpret_cast<char *>(input), sizeof(std::complex<T>),
-      reinterpret_cast<char *>(output), sizeof(T),
+      layout, idist, odist, reinterpret_cast<char *>(input),
+      sizeof(std::complex<T>), reinterpret_cast<char *>(output), sizeof(T),
       [&](int rank, int howmany, char *ci, char *co) {
         return traits::make_many_c2r(
             rank, layout.n.data(), howmany,

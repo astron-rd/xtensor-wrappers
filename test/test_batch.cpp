@@ -456,3 +456,36 @@ TEST_CASE("batched 2D r2c into caller buffers") {
     CHECK(allclose(got, ref));
   }
 }
+
+// The batch is split into one chunk per OpenMP thread, but never so finely
+// that a chunk falls below min_transforms_per_chunk transforms (doing so
+// fragments the batch: a handful of tiny FFTW calls per chunk cannot exploit
+// SIMD, which measurably regresses throughput on many-thread systems).
+TEST_CASE("batch chunk count caps parallel splitting") {
+  using namespace detail;
+  // Capped by the transform count floor: at most howmany / 64 chunks.
+  CHECK(batch_chunk_count(4096, 128) == 64);
+  CHECK(batch_chunk_count(1024, 128) == 16);
+  CHECK(batch_chunk_count(1024, 64) == 16);
+  // Capped by the available threads when the batch is big enough.
+  CHECK(batch_chunk_count(1024, 8) == 8);
+  CHECK(batch_chunk_count(1024, 1) == 1);
+  // Small batches stay single-chunk (serial, unchunked).
+  CHECK(batch_chunk_count(64, 1024) == 1);
+  CHECK(batch_chunk_count(8, 128) == 1);
+  CHECK(batch_chunk_count(1, 128) == 1);
+
+  // The resulting chunks are balanced and never smaller than the floor.
+  for (std::size_t howmany : {128ul, 1024ul, 4096ul, 65536ul}) {
+    std::vector<std::size_t> begins, counts;
+    const std::size_t parts = batch_chunk_count(howmany, 128);
+    chunk_ranges(howmany, parts, begins, counts);
+    REQUIRE(!counts.empty());
+    std::size_t total = 0;
+    for (std::size_t i = 0; i < counts.size(); ++i) {
+      CHECK(counts[i] >= min_transforms_per_chunk);
+      total += counts[i];
+    }
+    CHECK(total == howmany); // nothing dropped
+  }
+}

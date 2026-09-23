@@ -1,6 +1,7 @@
 #ifndef XTENSOR_WRAPPERS_PLAN_1D_HPP
 #define XTENSOR_WRAPPERS_PLAN_1D_HPP
 
+#include <algorithm>
 #include <cassert>
 #include <complex>
 #include <cstddef>
@@ -152,13 +153,21 @@ template <> struct plan_traits<double> {
 // chunks run in parallel (each transform still executes single-threaded, so
 // the result is identical to the serial order). For a single-chunk plan this
 // degenerates to one plain fftw*_execute() call.
+//
+// The parallel region is capped at `n` (the number of chunks) threads: an
+// OpenMP parallel-for over a handful of chunks would otherwise still spin up
+// every configured thread and idle them at the barrier, which measurably
+// regresses execution when the user has set a thread count far above the
+// chunk count.
 template <class Handle, class Exec>
 inline void execute_parallel(const Handle *plans, std::size_t n, Exec &&exec) {
   if (n == 0) {
     return;
   }
 #if XTENSOR_WRAPPERS_USE_OPENMP
-#pragma omp parallel for schedule(static)
+  const int threads =
+      static_cast<int>(std::min<std::size_t>(n, omp_get_max_threads()));
+#pragma omp parallel for schedule(static) num_threads(threads)
 #endif
   for (std::size_t i = 0; i < n; ++i) {
     exec(plans[i]);
